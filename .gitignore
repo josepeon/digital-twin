@@ -1,0 +1,53 @@
+# Personal data — NEVER commit
+data/personal/
+data/processed/
+
+# Voice samples and IDs — biometric data
+data/personal/voice/
+
+# RAG index
+data/personal/rag_index/
+
+# Model weights
+models/
+
+# Environment
+.env
+.env.*
+!.env.example
+
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.egg-info/
+dist/
+build/
+*.egg
+
+# Virtual environments
+.venv/
+venv/
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Pytest
+.pytest_cache/
+htmlcov/
+.coverage
+
+# Logs
+*.log
+logs/
+
+# Jupyter
+.ipynb_checkpoints/
