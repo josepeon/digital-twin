@@ -1,6 +1,7 @@
 # Personal data — NEVER commit
 data/personal/
 data/processed/
+raw/
 
 # Voice samples and IDs — biometric data
 data/personal/voice/
