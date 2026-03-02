@@ -15,6 +15,7 @@ Usage:
 from __future__ import annotations
 
 import argparse
+import json
 import sys
 from pathlib import Path
 
@@ -74,7 +75,7 @@ def clone_voice(
             name=voice_name,
             description=description,
             files=file_handles,
-            labels={"language": language, "accent": "cuban", "gender": "male"},
+            labels=json.dumps({"language": language, "accent": "cuban", "gender": "male"}),
             remove_background_noise=True,
         )
     finally:

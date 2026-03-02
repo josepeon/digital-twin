@@ -14,6 +14,8 @@ import io
 import re
 from pathlib import Path
 
+from elevenlabs.types import VoiceSettings
+
 from src.config import (
     ELEVENLABS_API_KEY,
     TTS_MODEL,
@@ -131,11 +133,20 @@ class VoiceEngine:
         voice_id = self.get_voice_id(lang)
         client = self._get_client()
 
+        # Use high similarity + speaker boost for better clone fidelity
+        voice_settings = VoiceSettings(
+            stability=0.3,
+            similarity_boost=1.0,
+            style=0.5,
+            use_speaker_boost=True,
+        )
+
         audio_generator = client.text_to_speech.convert(
             text=text,
             voice_id=voice_id,
             model_id=model_id or TTS_MODEL,
             output_format=output_format or TTS_OUTPUT_FORMAT,
+            voice_settings=voice_settings,
         )
 
         # Collect all chunks into bytes
@@ -164,11 +175,19 @@ class VoiceEngine:
         voice_id = self.get_voice_id(lang)
         client = self._get_client()
 
+        voice_settings = VoiceSettings(
+            stability=0.3,
+            similarity_boost=1.0,
+            style=0.5,
+            use_speaker_boost=True,
+        )
+
         audio_stream = client.text_to_speech.convert(
             text=text,
             voice_id=voice_id,
             model_id=model_id or TTS_MODEL_REALTIME,
             output_format=TTS_OUTPUT_FORMAT,
+            voice_settings=voice_settings,
         )
 
         yield from audio_stream

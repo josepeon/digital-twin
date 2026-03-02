@@ -67,5 +67,7 @@ DATASET_VERSIONS = {
     "v0.2": ["chatgpt", "instagram"],
     "v0.3": ["chatgpt", "instagram", "whatsapp", "imessage"],
     "v0.4": ["chatgpt", "instagram", "whatsapp", "imessage", "email"],
+    "v0.5": ["chatgpt", "instagram", "whatsapp", "imessage", "email"],
+    "v0.6": ["chatgpt", "instagram", "whatsapp", "imessage", "email"],
     "v1.0": ["chatgpt", "instagram", "whatsapp", "imessage", "email"],
 }

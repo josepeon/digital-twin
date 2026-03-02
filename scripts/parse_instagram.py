@@ -152,11 +152,20 @@ def parse_dms(instagram_dir: Path, jose_name: str, scrub_pii: bool = True) -> li
 
 def parse_posts(instagram_dir: Path, scrub_pii: bool = True) -> list[ParsedMessage]:
     """Parse Instagram post captions."""
-    posts_dir = instagram_dir / "your_instagram_activity" / "content"
-    if not posts_dir.exists():
-        posts_dir = instagram_dir / "content"
-    if not posts_dir.exists():
-        print(f"  ⚠ Posts directory not found: {posts_dir}")
+    # Try multiple known locations for posts JSON
+    candidates = [
+        instagram_dir / "your_instagram_activity" / "content",
+        instagram_dir / "your_instagram_activity" / "media",
+        instagram_dir / "content",
+        instagram_dir / "media",
+    ]
+    posts_dir = None
+    for c in candidates:
+        if c.exists() and list(c.glob("posts_*.json")):
+            posts_dir = c
+            break
+    if posts_dir is None:
+        print(f"  ⚠ Posts directory not found (tried content/ and media/)")
         return []
 
     results: list[ParsedMessage] = []
@@ -208,7 +217,10 @@ def parse_comments(instagram_dir: Path, scrub_pii: bool = True) -> list[ParsedMe
 
     results: list[ParsedMessage] = []
 
-    for comments_file in sorted(comments_dir.glob("post_comments*.json")):
+    for comments_file in sorted(
+        list(comments_dir.glob("post_comments*.json")) +
+        list(comments_dir.glob("reels_comments*.json"))
+    ):
         with open(comments_file, encoding="utf-8") as f:
             data = json.load(f)
 
@@ -309,9 +321,34 @@ def main() -> None:
         print("   Export: Instagram → Accounts Center → Download your information → JSON")
         sys.exit(1)
 
-    print(f"📂 Parsing Instagram export: {args.input}")
-    messages = parse_instagram_export(args.input, jose_name=args.jose_name, scrub_pii=not args.no_scrub)
-    print(f"   Total: {len(messages)} messages")
+    # Support multi-export: if the input dir contains sub-export folders, scan each
+    sub_exports = sorted([
+        d for d in args.input.iterdir()
+        if d.is_dir() and not d.name.startswith(".")
+    ])
+    has_activity = (args.input / "your_instagram_activity").exists()
+
+    all_messages: list[ParsedMessage] = []
+    if sub_exports and not has_activity:
+        print(f"📂 Found {len(sub_exports)} Instagram sub-exports in {args.input}")
+        for sub in sub_exports:
+            print(f"\n── {sub.name} ──")
+            msgs = parse_instagram_export(sub, jose_name=args.jose_name, scrub_pii=not args.no_scrub)
+            all_messages.extend(msgs)
+    else:
+        print(f"📂 Parsing Instagram export: {args.input}")
+        all_messages = parse_instagram_export(args.input, jose_name=args.jose_name, scrub_pii=not args.no_scrub)
+
+    # Deduplicate by (text, timestamp) across sub-exports
+    seen = set()
+    messages = []
+    for m in all_messages:
+        key = (m.text, str(m.timestamp))
+        if key not in seen:
+            seen.add(key)
+            messages.append(m)
+    print(f"\n   Total: {len(messages)} messages (deduped from {len(all_messages)})")
+
 
     args.output.parent.mkdir(parents=True, exist_ok=True)
     with open(args.output, "w", encoding="utf-8") as f:

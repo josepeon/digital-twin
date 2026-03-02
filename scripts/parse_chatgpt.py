@@ -101,18 +101,37 @@ def _walk_conversation(mapping: dict) -> list[dict]:
     return ordered
 
 
+def _load_conversations(filepath: Path) -> list[dict]:
+    """Load conversations from a single JSON file or a directory with split files."""
+    if filepath.is_dir():
+        # Scan for conversations*.json (split exports: conversations-000.json, etc.)
+        conv_files = sorted(filepath.rglob("conversations*.json"))
+        if not conv_files:
+            print(f"❌ No conversations*.json files found in {filepath}")
+            return []
+        all_convos: list[dict] = []
+        for cf in conv_files:
+            with open(cf, encoding="utf-8") as f:
+                data = json.load(f)
+            print(f"   Loaded {len(data)} conversations from {cf.name}")
+            all_convos.extend(data)
+        return all_convos
+    else:
+        with open(filepath, encoding="utf-8") as f:
+            return json.load(f)
+
+
 def parse_chatgpt_export(filepath: Path, scrub_pii: bool = True) -> list[ParsedMessage]:
     """Parse a ChatGPT conversations.json export.
 
     Args:
-        filepath: Path to conversations.json.
+        filepath: Path to conversations.json or directory containing split files.
         scrub_pii: Whether to run the PII scrubber on extracted text.
 
     Returns:
         List of ParsedMessage objects — one per Jose user message.
     """
-    with open(filepath, encoding="utf-8") as f:
-        conversations = json.load(f)
+    conversations = _load_conversations(filepath)
 
     messages: list[ParsedMessage] = []
 
@@ -172,8 +191,8 @@ def main() -> None:
     parser.add_argument(
         "--input", "-i",
         type=Path,
-        default=Path("data/personal/raw/chatgpt/conversations.json"),
-        help="Path to conversations.json",
+        default=Path("data/personal/raw/chatgpt"),
+        help="Path to conversations.json or directory containing split conversation files",
     )
     parser.add_argument(
         "--output", "-o",
@@ -185,7 +204,7 @@ def main() -> None:
     args = parser.parse_args()
 
     if not args.input.exists():
-        print(f"❌ Input file not found: {args.input}")
+        print(f"❌ Input not found: {args.input}")
         print("   Export your data: ChatGPT → Settings → Data Controls → Export")
         sys.exit(1)
 
