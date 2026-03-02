@@ -10,6 +10,7 @@ Endpoints:
 
 from __future__ import annotations
 
+import os
 from contextlib import asynccontextmanager
 from typing import Any
 
@@ -86,7 +87,7 @@ class AskRequest(BaseModel):
 class AskResponse(BaseModel):
     response: str
     language: str
-    register: str
+    style_register: str
     model: str
     examples_used: int
 
@@ -133,7 +134,7 @@ async def ask_jose(req: AskRequest) -> AskResponse:
     return AskResponse(
         response=result["response"],
         language=result["language"],
-        register=result["register"],
+        style_register=result["register"],
         model=result["model"],
         examples_used=result["examples_used"],
     )
@@ -209,11 +210,13 @@ async def ask_jose_stream(req: AskRequest) -> StreamingResponse:
 def main() -> None:
     """Run the API server."""
     import uvicorn
+
+    port = int(os.environ.get("PORT", 8000))
     uvicorn.run(
         "src.twin_api:app",
         host="0.0.0.0",
-        port=8000,
-        reload=True,
+        port=port,
+        reload=os.environ.get("RAILWAY_ENVIRONMENT") is None,  # Only reload in dev
     )
 
 

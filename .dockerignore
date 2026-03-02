@@ -1,0 +1,18 @@
+# Ignore everything by default, then whitelist what we need
+*
+
+# Application code
+!src/
+!pyproject.toml
+!requirements.txt
+
+# Data needed at runtime (gitignored but needed in Docker)
+!data/personal/rag_index/
+!data/personal/voice/voice_id_en.txt
+!data/personal/voice/voice_id_es.txt
+!data/personal/identity/
+
+# Exclude unnecessary files from whitelisted dirs
+**/__pycache__/
+**/*.py[cod]
+**/.DS_Store
