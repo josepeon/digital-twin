@@ -36,8 +36,8 @@ COPY data/personal/identity/ data/personal/identity/
 # Pre-download the sentence-transformers model so startup is fast
 RUN python -c "from sentence_transformers import SentenceTransformer; SentenceTransformer('all-MiniLM-L6-v2')"
 
-# Non-root user
-RUN useradd --create-home appuser
+# Non-root user — make rag_index writable (ChromaDB needs write access for WAL)
+RUN useradd --create-home appuser && chown -R appuser:appuser data/personal/rag_index
 USER appuser
 
 EXPOSE 8000
@@ -46,5 +46,5 @@ EXPOSE 8000
 HEALTHCHECK --interval=30s --timeout=10s --start-period=60s --retries=3 \
     CMD python -c "import urllib.request; urllib.request.urlopen('http://localhost:8000/health')" || exit 1
 
-# Start the API server
-CMD ["python", "-m", "uvicorn", "src.twin_api:app", "--host", "0.0.0.0", "--port", "8000"]
+# Start the API server (reads PORT from env, defaults to 8000)
+CMD ["python", "-c", "from src.twin_api import main; main()"]

@@ -11,6 +11,7 @@ Handles:
 from __future__ import annotations
 
 import json
+import logging
 import re
 from pathlib import Path
 from typing import Any
@@ -18,6 +19,8 @@ from typing import Any
 import chromadb
 from chromadb.utils import embedding_functions
 from groq import Groq
+
+logger = logging.getLogger(__name__)
 
 from src.config import (
     EMBEDDING_MODEL,
@@ -174,6 +177,7 @@ class PersonalityEngine:
             return self._collection
 
         if not self._rag_dir.exists():
+            logger.warning("RAG index directory not found: %s", self._rag_dir)
             return None
 
         try:
@@ -186,7 +190,8 @@ class PersonalityEngine:
                 embedding_function=ef,
             )
             return self._collection
-        except Exception:
+        except Exception as e:
+            logger.error("Failed to load RAG collection: %s", e)
             return None
 
     def _load_identity_facts(self) -> list[dict]:

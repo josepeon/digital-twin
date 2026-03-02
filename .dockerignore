@@ -7,10 +7,19 @@
 !requirements.txt
 
 # Data needed at runtime (gitignored but needed in Docker)
+# Must whitelist parent dirs for nested paths to work
+!data/
+data/*
+!data/personal/
+data/personal/*
 !data/personal/rag_index/
+!data/personal/rag_index/**
+!data/personal/voice/
+data/personal/voice/*
 !data/personal/voice/voice_id_en.txt
 !data/personal/voice/voice_id_es.txt
 !data/personal/identity/
+!data/personal/identity/**
 
 # Exclude unnecessary files from whitelisted dirs
 **/__pycache__/
