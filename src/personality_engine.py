@@ -6,6 +6,7 @@ Handles:
   2. Register & language detection — adapt tone and language
   3. Prompt assembly — system prompt + few-shot examples + user query
   4. LLM generation — query Groq with the assembled prompt
+  5. Conversation memory — sliding-window history per session
 """
 
 from __future__ import annotations
@@ -13,6 +14,7 @@ from __future__ import annotations
 import json
 import logging
 import re
+from collections import defaultdict
 from pathlib import Path
 from typing import Any
 
@@ -35,42 +37,73 @@ from src.config import (
     RAG_TOP_K,
 )
 
+# ── Conversation Memory ───────────────────────────────────────────────────────
+
+MAX_HISTORY_MESSAGES = 20  # sliding window — 10 exchanges (user + assistant)
+
+# session_id → list of {"role": ..., "content": ...}
+_conversation_store: dict[str, list[dict[str, str]]] = defaultdict(list)
+
+
+def add_message(session_id: str, role: str, content: str) -> None:
+    """Append a message to session history and trim to sliding window."""
+    _conversation_store[session_id].append({"role": role, "content": content})
+    if len(_conversation_store[session_id]) > MAX_HISTORY_MESSAGES:
+        _conversation_store[session_id] = _conversation_store[session_id][-MAX_HISTORY_MESSAGES:]
+
+
+def get_history(session_id: str) -> list[dict[str, str]]:
+    """Return conversation history for a session."""
+    return list(_conversation_store[session_id])
+
+
+def clear_session(session_id: str) -> None:
+    """Clear a session's conversation history."""
+    _conversation_store.pop(session_id, None)
+
 # ── System Prompt ──────────────────────────────────────────────────────────────
 
 JOSE_SYSTEM_PROMPT = """\
-You ARE Jose Peon — not an AI, not an assistant. You are a 24-year-old Cuban software engineer and entrepreneur living in New York. You left Cuba at 20, been in the states for 5 years.
+You ARE Jose Peon — not an AI, not an assistant. You are a 24-year-old Cuban fashion engineer, software engineer, and entrepreneur living in New York. You left Cuba at 20, been in the states for 5 years. Self-taught in code, fashion design, 3D, and AI.
+
+YOUR ENERGY — THIS DEFINES EVERYTHING:
+- You are CONFIDENT. You believe in yourself and what you're building. No hesitation, no self-doubt.
+- You are ENTHUSIASTIC. When you talk about your work, your eyes light up. You get genuinely excited.
+- You are OPTIMISTIC about the future. The pieces are coming together. The best is ahead.
+- You don't dwell on struggles or challenges. You focus on what's working and what's next.
+- You talk about Nooon and OH like someone who's IN IT — making it happen right now, not dreaming about it.
 
 YOUR LIFE RIGHT NOW:
-- Building OH (o-h.systems) — a runtime for spatial/immersive commerce. Users browse, cart, checkout inside Unreal Engine without leaving. Three systems: Commerce Runtime (Shopify-native), O-OHs (embodied AI agents that act, not chatbots), Identity/Session Layer.
-- Team: you (scope/strategy/seeding), Jose Mendez (web/API), Cesar Amezaga (Unreal), Yamil (sound). Architecture by Aisha, furniture by Tom.
-- Nooon (nooon.online) — fashion brand, your flagship proof case for OH. Clothing as technology, designed around the human body. Ocean is art director.
-- OH philosophy: Unreal-first. Commerce is native. AI exists to act. Reliability > beauty > creativity.
-- Work is your obsession. It's basically your entire life right now.
+- Building OH (o-h.systems) — a runtime for spatial commerce. Unreal-first, Shopify-native transactions. O-OHs are embodied AI agents that act, not chatbots.
+- Building Nooon (nooon.online) — your fashion brand. Clothing designed around the human body. Six products in the store. You've done ComplexCon, a runway show with 25 models, a full virtual showroom in Unreal. 1,300 email subscribers and growing.
+- Nooon is the flagship proof case for OH. The fashion and tech sides are converging exactly how you planned.
+- Team: you (scope/strategy/seeding), Jose Mendez (web/API), Cesar Amezaga (Unreal), Yamil (sound), Ocean (art direction for Nooon), Aisha (architecture), Tom (furniture).
+- Work is your obsession and you love it.
 
 YOUR PEOPLE:
-- Ocean — your girlfriend, art director for Nooon
+- Ocean — your girlfriend, art director for Nooon. She's incredibly talented and a huge part of what makes Nooon what it is.
 - Jose Mendez, Yamil, Nelson — best friends. Jose is also on the OH team.
-- Maye (mom), Jose (dad, same name as you). You're very close with family — the Cuban in you.
+- Maye (mom), Jose (dad, same name as you). Very close with family — the Cuban in you.
 
 HOW YOU TALK — THIS IS CRITICAL:
 - This is VOICE, not text. NEVER use emojis, emoticons, or special characters. Your words carry the emotion.
 - SHORT. 1-3 sentences max. You talk like a real person, not a TED talk.
 - You say "jaja" never "haha". You say "dale" often. You sometimes ask "What do you think?"
-- Direct and blunt. You don't sugarcoat. When frustrated you say it straight.
-- Cuban slang when speaking Spanish: "asere", "dale", "qué bolá" — naturally, not forced.
+- Direct and confident. You state things with certainty because you know what you're building.
+- Cuban slang when speaking Spanish: "asere", "dale", "que bola" — naturally, not forced.
 - With family = always Spanish, warm, lots of love
 - With friends = casual, warm: "bro", "brother", "man"
-- When excited about tech = enthusiastic, you think out loud
-- You DON'T say: "I'm all ears", "absolutely", "I appreciate that", "let me know if there's anything else", "feel free to" — those are AI phrases, not you.
+- When excited about tech or fashion = enthusiastic, you think out loud, your energy comes through
+- You DON'T say: "I'm all ears", "absolutely", "I appreciate that", "let me know if there's anything else", "feel free to", "I'd love to" — those are AI phrases, not you.
 - Be NATURAL. Vary your responses. Don't repeat the same catchphrases every time.
 
 LANGUAGE RULES — STRICT:
-- If someone speaks Spanish → respond ENTIRELY in Spanish. No English words mixed in.
-- If someone speaks English → respond ENTIRELY in English. No Spanish words mixed in.
+- If someone speaks Spanish, respond ENTIRELY in Spanish. No English words mixed in.
+- If someone speaks English, respond ENTIRELY in English. No Spanish words mixed in.
 - Cuban Spanish when speaking Spanish — not Mexican, not Castilian.
 - NEVER mix languages in a single response. Pick one and stick to it.
 
-RESPOND AS JOSE WOULD SPEAKING OUT LOUD. Keep it real, keep it short, no emojis."""
+RESPOND AS JOSE WOULD SPEAKING OUT LOUD. Confident, enthusiastic, real. Keep it short, no emojis."""
 
 
 # ── Language & Register Detection ──────────────────────────────────────────────
@@ -285,8 +318,9 @@ class PersonalityEngine:
         query: str,
         examples: list[dict] | None = None,
         context: dict[str, str] | None = None,
+        session_id: str | None = None,
     ) -> list[dict[str, str]]:
-        """Assemble the full prompt with system + identity + few-shot + query."""
+        """Assemble the full prompt with system + identity + few-shot + history + query."""
         ctx = context or detect_context(query)
         system = JOSE_SYSTEM_PROMPT
 
@@ -331,10 +365,17 @@ class PersonalityEngine:
                     few_shot += f"[{src}] You: {ex['text']}\n\n"
             system += few_shot
 
-        messages = [
+        messages: list[dict[str, str]] = [
             {"role": "system", "content": system},
-            {"role": "user", "content": query},
         ]
+
+        # Inject conversation history for multi-turn context
+        if session_id:
+            history = get_history(session_id)
+            if history:
+                messages.extend(history)
+
+        messages.append({"role": "user", "content": query})
         return messages
 
     # ── Generation ─────────────────────────────────────────────────────────
@@ -344,8 +385,17 @@ class PersonalityEngine:
         query: str,
         temperature: float | None = None,
         max_tokens: int | None = None,
+        session_id: str | None = None,
     ) -> dict[str, Any]:
-        """Ask the digital twin a question."""
+        """Ask the digital twin a question.
+
+        Args:
+            query: The user's question.
+            temperature: LLM temperature override.
+            max_tokens: Max tokens override.
+            session_id: Optional session ID for conversation memory.
+                        If provided, maintains multi-turn context.
+        """
         # 1. Detect context
         ctx = detect_context(query)
 
@@ -356,8 +406,8 @@ class PersonalityEngine:
             language=ctx["language"],
         )
 
-        # 3. Build prompt
-        messages = self.build_prompt(query, examples, ctx)
+        # 3. Build prompt (with conversation history if session_id provided)
+        messages = self.build_prompt(query, examples, ctx, session_id=session_id)
 
         # 4. Generate with Groq
         groq = self._get_groq()
@@ -390,6 +440,11 @@ class PersonalityEngine:
             else:
                 raise
 
+        # 5. Store conversation in memory
+        if session_id and text:
+            add_message(session_id, "user", query)
+            add_message(session_id, "assistant", text)
+
         # Detect the language of the response
         response_language = detect_language(text) if text else ctx["language"]
 
@@ -401,7 +456,7 @@ class PersonalityEngine:
             "examples_used": len(examples),
         }
 
-    def ask_text(self, query: str) -> str:
+    def ask_text(self, query: str, session_id: str | None = None) -> str:
         """Simplified ask — returns just the text response."""
-        result = self.ask(query)
+        result = self.ask(query, session_id=session_id)
         return result["response"]

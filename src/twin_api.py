@@ -2,28 +2,32 @@
 FastAPI service — the Digital Twin API.
 
 Endpoints:
-  POST /ask-jose        → Text response
-  POST /ask-jose/voice  → Audio (MP3) response
-  POST /ask-jose/stream → Streaming audio response
-  GET  /health          → Health check
-  GET  /                → Web chat UI
+  POST  /ask-jose        → Text response
+  POST  /ask-jose/voice  → Audio (MP3) response
+  POST  /ask-jose/stream → Streaming audio response
+  WS    /ws              → WebSocket streaming (text + optional voice)
+  GET   /health          → Health check
+  GET   /                → Web chat UI
 """
 
 from __future__ import annotations
 
+import asyncio
+import json
 import os
+import uuid
 from contextlib import asynccontextmanager
 from pathlib import Path
 from typing import Any
 
-from fastapi import Depends, FastAPI, HTTPException, Request
+from fastapi import Depends, FastAPI, HTTPException, Request, WebSocket, WebSocketDisconnect
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse, Response, StreamingResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field
 
 from src.config import TWIN_API_KEY
-from src.personality_engine import PersonalityEngine
+from src.personality_engine import PersonalityEngine, clear_session
 from src.voice import VoiceEngine
 
 # ── Lifespan ───────────────────────────────────────────────────────────────────
@@ -90,6 +94,7 @@ class AskRequest(BaseModel):
     query: str = Field(..., min_length=1, max_length=5000, description="Question or message to Jose")
     language: str | None = Field(None, description="Force language: 'en' or 'es'")
     temperature: float | None = Field(None, ge=0.0, le=2.0, description="LLM temperature")
+    session_id: str | None = Field(None, description="Session ID for conversation memory. Omit for stateless.")
 
 
 class AskResponse(BaseModel):
@@ -137,6 +142,7 @@ async def ask_jose(req: AskRequest) -> AskResponse:
     result = _engine.ask(
         query=req.query,
         temperature=req.temperature,
+        session_id=req.session_id,
     )
 
     return AskResponse(
@@ -160,6 +166,7 @@ async def ask_jose_voice(req: AskRequest) -> Response:
     result = _engine.ask(
         query=req.query,
         temperature=req.temperature,
+        session_id=req.session_id,
     )
 
     # Convert to speech
@@ -194,6 +201,7 @@ async def ask_jose_stream(req: AskRequest) -> StreamingResponse:
     result = _engine.ask(
         query=req.query,
         temperature=req.temperature,
+        session_id=req.session_id,
     )
 
     # Stream audio
@@ -211,6 +219,115 @@ async def ask_jose_stream(req: AskRequest) -> StreamingResponse:
             "X-Response-Language": result["language"],
         },
     )
+
+
+# ── WebSocket Streaming ────────────────────────────────────────────────────────
+
+
+@app.websocket("/ws")
+async def websocket_endpoint(ws: WebSocket):
+    """WebSocket endpoint for real-time streaming.
+
+    Client sends JSON: {"query": "...", "session_id": "...", "voice": false}
+    Server streams JSON frames:
+      {"type": "text",  "content": "partial text...", "done": false}
+      {"type": "text",  "content": "full text",       "done": true, "language": "en"}
+      {"type": "audio", "content": "<base64 mp3>"}  (if voice=true)
+      {"type": "error", "content": "error message"}
+    """
+    await ws.accept()
+
+    # Auth check — first message can be {"type": "auth", "key": "..."}
+    try:
+        raw = await asyncio.wait_for(ws.receive_text(), timeout=10)
+        first_msg = json.loads(raw)
+
+        if first_msg.get("type") == "auth":
+            if TWIN_API_KEY and first_msg.get("key") != TWIN_API_KEY:
+                await ws.send_json({"type": "error", "content": "Invalid API key"})
+                await ws.close(code=4001)
+                return
+            # Auth passed, wait for actual query
+            raw = await ws.receive_text()
+            first_msg = json.loads(raw)
+        elif TWIN_API_KEY:
+            # No auth message and key is required
+            await ws.send_json({"type": "error", "content": "Auth required — send {type: 'auth', key: '...'} first"})
+            await ws.close(code=4001)
+            return
+
+        # Process first query
+        await _handle_ws_query(ws, first_msg)
+
+    except WebSocketDisconnect:
+        return
+    except Exception as e:
+        try:
+            await ws.send_json({"type": "error", "content": str(e)})
+        except Exception:
+            pass
+        return
+
+    # Keep connection alive for follow-up queries
+    try:
+        while True:
+            raw = await ws.receive_text()
+            msg = json.loads(raw)
+            await _handle_ws_query(ws, msg)
+    except WebSocketDisconnect:
+        pass
+    except Exception:
+        pass
+
+
+async def _handle_ws_query(ws: WebSocket, msg: dict) -> None:
+    """Handle a single query over WebSocket."""
+    if _engine is None:
+        await ws.send_json({"type": "error", "content": "Engine not initialized"})
+        return
+
+    query = msg.get("query", "").strip()
+    if not query:
+        await ws.send_json({"type": "error", "content": "Empty query"})
+        return
+
+    session_id = msg.get("session_id", str(uuid.uuid4()))
+    want_voice = msg.get("voice", False)
+
+    # Generate text response (runs in thread pool to not block event loop)
+    loop = asyncio.get_event_loop()
+    result = await loop.run_in_executor(
+        None,
+        lambda: _engine.ask(query=query, session_id=session_id),
+    )
+
+    text = result["response"]
+    lang = result["language"]
+
+    # Send complete text
+    await ws.send_json({
+        "type": "text",
+        "content": text,
+        "done": True,
+        "language": lang,
+        "session_id": session_id,
+    })
+
+    # Optionally generate and send voice
+    if want_voice and _voice and text:
+        try:
+            import base64
+            audio_bytes = await loop.run_in_executor(
+                None,
+                lambda: _voice.speak(text=text, language=lang),
+            )
+            audio_b64 = base64.b64encode(audio_bytes).decode("utf-8")
+            await ws.send_json({
+                "type": "audio",
+                "content": audio_b64,
+            })
+        except Exception as e:
+            await ws.send_json({"type": "error", "content": f"TTS failed: {e}"})
 
 
 # ── Web UI ─────────────────────────────────────────────────────────────────────

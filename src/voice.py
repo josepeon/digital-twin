@@ -133,11 +133,11 @@ class VoiceEngine:
         voice_id = self.get_voice_id(lang)
         client = self._get_client()
 
-        # Use high similarity + speaker boost for better clone fidelity
+        # Tuned for short, confident, expressive speech
         voice_settings = VoiceSettings(
-            stability=0.3,
+            stability=0.35,
             similarity_boost=1.0,
-            style=0.5,
+            style=0.65,
             use_speaker_boost=True,
         )
 
@@ -176,9 +176,9 @@ class VoiceEngine:
         client = self._get_client()
 
         voice_settings = VoiceSettings(
-            stability=0.3,
+            stability=0.35,
             similarity_boost=1.0,
-            style=0.5,
+            style=0.65,
             use_speaker_boost=True,
         )
 
