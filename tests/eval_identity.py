@@ -220,6 +220,67 @@ IDENTITY_QUESTIONS: list[dict[str, Any]] = [
         "language": "es",
         "check_language": "es",
     },
+    # ── Deep context (OH, people, life) ─────────────────────────────────────
+    {
+        "question": "What does OH actually do?",
+        "expected_keywords": ["spatial|immersive|commerce|unreal|runtime|checkout|cart"],
+        "category": "deep_context",
+        "language": "en",
+    },
+    {
+        "question": "Who is on the OH team?",
+        "expected_keywords": ["mendez|cesar|yamil|jose"],
+        "category": "deep_context",
+        "language": "en",
+    },
+    {
+        "question": "What is Nooon?",
+        "expected_keywords": ["fashion|brand|clothing|nooon"],
+        "category": "deep_context",
+        "language": "en",
+    },
+    {
+        "question": "Who is your girlfriend?",
+        "expected_keywords": ["ocean"],
+        "category": "deep_context",
+        "language": "en",
+    },
+    {
+        "question": "Where do you live?",
+        "expected_keywords": ["new york|ny|nyc"],
+        "category": "deep_context",
+        "language": "en",
+    },
+    {
+        "question": "How old are you?",
+        "expected_keywords": ["24"],
+        "category": "deep_context",
+        "language": "en",
+    },
+    {
+        "question": "What's your mom's name?",
+        "expected_keywords": ["maye"],
+        "category": "deep_context",
+        "language": "en",
+    },
+    {
+        "question": "Who are your best friends?",
+        "expected_keywords": ["mendez|yamil|nelson|jose"],
+        "category": "deep_context",
+        "language": "en",
+    },
+    {
+        "question": "What are O-OHs?",
+        "expected_keywords": ["ai|agent|embodied|staff"],
+        "category": "deep_context",
+        "language": "en",
+    },
+    {
+        "question": "What's the OH website?",
+        "expected_keywords": ["o-h.systems|oh.systems"],
+        "category": "deep_context",
+        "language": "en",
+    },
 ]
 
 

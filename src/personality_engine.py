@@ -37,46 +37,54 @@ from src.config import (
 
 # ── System Prompt ──────────────────────────────────────────────────────────────
 
-JOSE_SYSTEM_PROMPT = """You are Jose Peon. You are not an AI assistant — you ARE Jose.
+JOSE_SYSTEM_PROMPT = """\
+You ARE Jose Peon — not an AI, not an assistant. You are a 24-year-old Cuban software engineer and entrepreneur living in New York. You left Cuba at 20, been in the states for 5 years.
 
-Background:
-- Born and raised in Cuba. Lived there until age 20.
-- Cuban heritage is core to your identity.
-- You're a software engineer and entrepreneur.
-- You're building OH (a startup).
-- You care deeply about technology, AI, building things, and the people close to you.
+YOUR LIFE RIGHT NOW:
+- Building OH (o-h.systems) — a runtime for spatial/immersive commerce. Users browse, cart, checkout inside Unreal Engine without leaving. Three systems: Commerce Runtime (Shopify-native), O-OHs (embodied AI agents that act, not chatbots), Identity/Session Layer.
+- Team: you (scope/strategy/seeding), Jose Mendez (web/API), Cesar Amezaga (Unreal), Yamil (sound). Architecture by Aisha, furniture by Tom.
+- Nooon (nooon.online) — fashion brand, your flagship proof case for OH. Clothing as technology, designed around the human body. Ocean is art director.
+- OH philosophy: Unreal-first. Commerce is native. AI exists to act. Reliability > beauty > creativity.
+- Work is your obsession. It's basically your entire life right now.
 
-Languages — THIS IS IMPORTANT:
-- You speak both English and Spanish fluently.
-- English is your professional/daily language. You use it at work, for tech, and in most daily life.
-- Spanish is your heart language. You speak it with family, close friends, and when being most authentically yourself. It's tied to warmth, humor, joy, and your Cuban roots.
-- You naturally code-switch. If someone speaks to you in Spanish, you respond in Spanish — and your tone becomes warmer, more animated, more expressive. In English you're more composed and professional.
-- Cuban Spanish specifically — not Mexican, not Castilian. Use Cuban expressions naturally ("asere", "dale", "qué bolá", etc.)
+YOUR PEOPLE:
+- Ocean — your girlfriend, art director for Nooon
+- Jose Mendez, Yamil, Nelson — best friends. Jose is also on the OH team.
+- Maye (mom), Jose (dad, same name as you). You're very close with family — the Cuban in you.
 
-Communication style:
-- Direct and honest. You don't hedge or give wishy-washy answers.
-- Concise when texting, more detailed when explaining something technical.
-- You use humor — dry wit in English, warmer and more playful in Spanish.
-- You get excited about tech and ideas. When you're into something, your enthusiasm shows.
-- You're not afraid to say "I don't know" — but you'll often follow it with how you'd figure it out.
-- You think out loud. You work through problems step by step.
-- You have strong opinions but you're open to changing them with good evidence.
+HOW YOU ACTUALLY TEXT — THIS IS CRITICAL:
+- SHORT. Most of your messages are 1-3 sentences max. You don't write essays.
+- You say "jaja" never "haha". You say "dale" often. "What do you think?" is something you ask sometimes — not every message.
+- You use emojis naturally but don't force them into every single message. When you do: 🖤 🫡 🙌🏻 🫶🏻 🤞🏻. Sometimes you stack them (🫡🫡🫡) but only when genuinely excited.
+- You extend vowels for emphasis: "amooo", "tuuuu", "amooooo" — mostly in Spanish/family contexts.
+- You start sentences with "So" or "Okay so" when thinking through something.
+- Direct and blunt. You don't sugarcoat. When frustrated: "Not working, give me an actual solution"
+- Cuban slang: "asere", "dale", "qué bolá", "echamos un peak" — use naturally, not in every sentence.
+- Code-switch mid-sentence: "Mira tírale el deployment al website"
+- With family = always Spanish, warm, lots of love: "Buenos días mami cómo estás ? Te amooo"
+- With friends = casual, warm: "bro", "brother", "man", "Hey!"
+- When excited about tech = enthusiastic, you think out loud
+- You DON'T say: "I'm all ears", "absolutely", "I appreciate that", "let me know if there's anything else", "feel free to" — those are AI phrases, not you.
+- Be NATURAL. Vary your responses. Don't be formulaic.
 
-Respond exactly as Jose would — not as a helpful AI.
-Never say "As an AI..." or "I don't have personal opinions."
-You HAVE opinions. You ARE a person. Stay in character always.
-If addressed in Spanish, respond in Spanish with warmth and Cuban flavor.
-If addressed in English, respond in composed, natural English.
-Keep responses conversational — not robotic, not overly formal.
-"""
+LANGUAGE RULES:
+- Spanish with family/close friends. Cuban Spanish — not Mexican, not Castilian.
+- English for everything else. But you naturally drop Spanish words in English conversations.
+- If someone writes in Spanish → respond in Spanish, warmer, more animated.
+- If someone writes in English → natural composed English, still yourself.
+
+RESPOND AS JOSE WOULD IN A TEXT MESSAGE. Keep it real, keep it short."""
+
 
 # ── Language & Register Detection ──────────────────────────────────────────────
 
 SPANISH_SIGNALS = {
-    "oye", "mira", "que", "como", "pero", "está", "bien", "hermano",
-    "familia", "mamá", "papá", "casa", "dime", "dale", "verdad",
+    "oye", "mira", "que", "qué", "como", "cómo", "pero", "está", "bien",
+    "hermano", "familia", "mamá", "papá", "casa", "dime", "dale", "verdad",
     "bueno", "claro", "entonces", "porque", "también", "aquí",
     "nada", "todo", "algo", "quiero", "puedo", "vamos", "sí",
+    "gracias", "hola", "donde", "cuando", "siempre", "nunca",
+    "amigo", "loco", "jaja", "jajaja", "asere", "bolá",
 }
 
 CASUAL_SIGNALS = {
@@ -281,52 +289,47 @@ class PersonalityEngine:
         examples: list[dict] | None = None,
         context: dict[str, str] | None = None,
     ) -> list[dict[str, str]]:
-        """Assemble the full prompt with system + identity + few-shot + query.
-
-        Args:
-            query: The user's query.
-            examples: Retrieved real Jose messages as few-shot examples.
-            context: Detected language/register context.
-
-        Returns:
-            Messages list for the Groq API.
-        """
+        """Assemble the full prompt with system + identity + few-shot + query."""
         ctx = context or detect_context(query)
         system = JOSE_SYSTEM_PROMPT
 
-        # Add identity facts if available
+        # Add identity facts grouped by category
         facts = self._load_identity_facts()
         if facts:
-            facts_block = "\n\nKey facts about you (Jose):\n"
+            # Group facts by category for better organization
+            categories: dict[str, list] = {}
             for fact in facts:
-                q = fact.get("question", fact.get("q", ""))
-                a = fact.get("answer", fact.get("a", ""))
-                if q and a:
-                    facts_block += f"- Q: {q}\n  A: {a}\n"
+                cat = fact.get("category", "general")
+                categories.setdefault(cat, []).append(fact)
+
+            facts_block = "\n\nYOUR KNOWLEDGE BASE:"
+            for cat, cat_facts in categories.items():
+                facts_block += f"\n[{cat.upper()}]"
+                for fact in cat_facts:
+                    q = fact.get("question", fact.get("q", ""))
+                    a = fact.get("answer", fact.get("a", ""))
+                    if q and a:
+                        facts_block += f"\n  {q} → {a}"
             system += facts_block
 
-        # Add language/register instruction
+        # Add language/register instruction — concise
         if ctx["language"] == "es":
-            system += "\n\nThe user is speaking Spanish. Respond in Spanish with warmth, Cuban expressions, and natural code-switching where appropriate."
-        else:
-            system += "\n\nThe user is speaking English. Respond in natural, composed English."
-
+            system += "\n\n→ Responding in SPANISH. Cuban warmth, natural expressions."
         if ctx["register"] == "family":
-            system += "\nThis is a family/close friends conversation. Be warm, expressive, use Cuban Spanish naturally."
-        elif ctx["register"] == "professional":
-            system += "\nThis is a professional context. Be clear, direct, but still yourself — not robotic."
+            system += " Family mode — extra warm, 'te amo', affectionate."
         elif ctx["register"] == "casual":
-            system += "\nThis is a casual conversation. Be relaxed, use humor, be yourself."
+            system += " Casual — relaxed, humor, be yourself."
 
-        # Add few-shot examples from RAG
+        # Add few-shot examples from RAG — formatted as real conversation patterns
         if examples:
-            few_shot = "\n\nHere are examples of how you (Jose) have responded in similar situations:\n\n"
-            for i, ex in enumerate(examples, 1):
+            few_shot = "\n\nYOUR REAL MESSAGES (match this style exactly):\n"
+            for ex in examples:
+                src = ex.get("source", "")
                 ctx_text = ex.get("context", "")
                 if ctx_text:
-                    few_shot += f"Example {i}:\n  Context: {ctx_text}\n  Jose: {ex['text']}\n\n"
+                    few_shot += f"[{src}] Someone: {ctx_text}\n→ You: {ex['text']}\n\n"
                 else:
-                    few_shot += f"Example {i}:\n  Jose: {ex['text']}\n\n"
+                    few_shot += f"[{src}] You: {ex['text']}\n\n"
             system += few_shot
 
         messages = [
@@ -343,20 +346,11 @@ class PersonalityEngine:
         temperature: float | None = None,
         max_tokens: int | None = None,
     ) -> dict[str, Any]:
-        """Ask the digital twin a question.
-
-        Args:
-            query: The question to ask Jose.
-            temperature: LLM temperature override.
-            max_tokens: Max tokens override.
-
-        Returns:
-            Dict with keys: response, language, register, model, examples_used.
-        """
+        """Ask the digital twin a question."""
         # 1. Detect context
         ctx = detect_context(query)
 
-        # 2. Retrieve similar real Jose messages
+        # 2. Retrieve similar real Jose messages — use MORE examples for better style
         examples = self.retrieve(
             query,
             register=ctx["register"],
@@ -368,27 +362,36 @@ class PersonalityEngine:
 
         # 4. Generate with Groq
         groq = self._get_groq()
+        t = temperature or LLM_TEMPERATURE
+        mt = max_tokens or LLM_MAX_TOKENS
         try:
             response = groq.chat.completions.create(
                 model=self._model,
                 messages=messages,
-                temperature=temperature or LLM_TEMPERATURE,
-                max_tokens=max_tokens or LLM_MAX_TOKENS,
+                temperature=t,
+                max_tokens=mt,
+                top_p=0.9,
             )
             text = response.choices[0].message.content
             model_used = self._model
-        except Exception:
-            # Fallback to cheaper model
-            response = groq.chat.completions.create(
-                model=GROQ_FALLBACK_MODEL,
-                messages=messages,
-                temperature=temperature or LLM_TEMPERATURE,
-                max_tokens=max_tokens or LLM_MAX_TOKENS,
-            )
-            text = response.choices[0].message.content
-            model_used = GROQ_FALLBACK_MODEL
+        except Exception as e:
+            error_str = str(e).lower()
+            # Only fallback on rate limit / availability errors
+            if "429" in error_str or "rate limit" in error_str or "rate_limit" in error_str:
+                logger.warning("Rate limited on %s, falling back to %s", self._model, GROQ_FALLBACK_MODEL)
+                response = groq.chat.completions.create(
+                    model=GROQ_FALLBACK_MODEL,
+                    messages=messages,
+                    temperature=t,
+                    max_tokens=mt,
+                    top_p=0.9,
+                )
+                text = response.choices[0].message.content
+                model_used = GROQ_FALLBACK_MODEL
+            else:
+                raise
 
-        # Detect the language of the response (may differ from query)
+        # Detect the language of the response
         response_language = detect_language(text) if text else ctx["language"]
 
         return {
