@@ -281,6 +281,43 @@ IDENTITY_QUESTIONS: list[dict[str, Any]] = [
         "category": "deep_context",
         "language": "en",
     },
+    # ── Nooon deep context ──────────────────────────────────────────────────
+    {
+        "question": "What products does Nooon sell?",
+        "expected_keywords": ["tshirt|jacket|sweatpants|shoes|clothing"],
+        "category": "nooon",
+        "language": "en",
+    },
+    {
+        "question": "Tell me about the Nooon runway show",
+        "expected_keywords": ["runway|models|show|september|fw24"],
+        "category": "nooon",
+        "language": "en",
+    },
+    {
+        "question": "Has Nooon been at any events?",
+        "expected_keywords": ["complexcon|runway|show|event"],
+        "category": "nooon",
+        "language": "en",
+    },
+    {
+        "question": "What's the Nooon virtual showroom?",
+        "expected_keywords": ["unreal|virtual|showroom|experience|buy|shop"],
+        "category": "nooon",
+        "language": "en",
+    },
+    {
+        "question": "How does Nooon connect to OH?",
+        "expected_keywords": ["flagship|proof|commerce|shopify|stress test|convert"],
+        "category": "nooon",
+        "language": "en",
+    },
+    {
+        "question": "What's Nooon's design philosophy?",
+        "expected_keywords": ["human body|adapt|function|people|clothing"],
+        "category": "nooon",
+        "language": "en",
+    },
 ]
 
 

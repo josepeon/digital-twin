@@ -367,6 +367,7 @@
         const statusText = document.getElementById('statusText');
 
         let conversationHistory = [];
+        let sessionId = crypto.randomUUID();
 
         // Auto-resize textarea
         function autoResize(el) {
@@ -451,15 +452,6 @@
             addMessage('user', query);
             conversationHistory.push({ role: 'user', content: query });
 
-            // Build context-enriched query
-            let enrichedQuery = query;
-            if (conversationHistory.length > 2) {
-                const context = conversationHistory.slice(-8).map(t =>
-                    `${t.role === 'user' ? 'User' : 'Jose'}: ${t.content.slice(0, 200)}`
-                ).join('\n');
-                enrichedQuery = `[Previous conversation for context:\n${context}]\n\nUser's latest message: ${query}`;
-            }
-
             // Show typing
             typingEl.classList.add('show');
             messagesEl.scrollTop = messagesEl.scrollHeight;
@@ -473,16 +465,15 @@
                     headers['Authorization'] = `Bearer ${config.apiKey}`;
                 }
 
-                // If voice, use /ask-jose/voice to get audio
-                let endpoint = '/ask-jose';
-                let responseHandler;
+                // Use session_id for server-side conversation memory
+                const body = { query, session_id: sessionId };
 
                 if (config.voice) {
                     // Get text response first
                     const textResp = await fetch(`${config.apiUrl}/ask-jose`, {
                         method: 'POST',
                         headers,
-                        body: JSON.stringify({ query: enrichedQuery }),
+                        body: JSON.stringify(body),
                     });
 
                     if (!textResp.ok) {
@@ -498,7 +489,7 @@
                     const audioResp = await fetch(`${config.apiUrl}/ask-jose/voice`, {
                         method: 'POST',
                         headers,
-                        body: JSON.stringify({ query: enrichedQuery }),
+                        body: JSON.stringify(body),
                     });
 
                     let audioUrl = null;
@@ -520,11 +511,11 @@
                     const resp = await fetch(`${config.apiUrl}/ask-jose`, {
                         method: 'POST',
                         headers,
-                        body: JSON.stringify({ query: enrichedQuery }),
+                        body: JSON.stringify(body),
                     });
 
                     if (!resp.ok) {
-                        throw new Error(resp.status === 401 ? 'Invalid API key — set it in Settings ⚙' : `Error ${resp.status}`);
+                        throw new Error(resp.status === 401 ? 'Invalid API key — set it in Settings' : `Error ${resp.status}`);
                     }
 
                     const data = await resp.json();
