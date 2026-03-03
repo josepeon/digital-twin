@@ -34,12 +34,12 @@ TWIN_API_KEY: str = os.getenv("TWIN_API_KEY", "")
 GROQ_MODEL: str = os.getenv("GROQ_MODEL", "llama-3.3-70b-versatile")
 GROQ_FALLBACK_MODEL: str = os.getenv("GROQ_FALLBACK_MODEL", "qwen/qwen3-32b")
 LLM_TEMPERATURE: float = float(os.getenv("LLM_TEMPERATURE", "0.7"))
-LLM_MAX_TOKENS: int = int(os.getenv("LLM_MAX_TOKENS", "1024"))
+LLM_MAX_TOKENS: int = int(os.getenv("LLM_MAX_TOKENS", "256"))
 
 # ── RAG Config ─────────────────────────────────────────────────────────────────
 EMBEDDING_MODEL: str = os.getenv("EMBEDDING_MODEL", "all-MiniLM-L6-v2")
 RAG_COLLECTION_NAME: str = "jose_messages"
-RAG_TOP_K: int = int(os.getenv("RAG_TOP_K", "7"))
+RAG_TOP_K: int = int(os.getenv("RAG_TOP_K", "15"))
 
 # ── Voice Config ───────────────────────────────────────────────────────────────
 TTS_MODEL: str = os.getenv("TTS_MODEL", "eleven_multilingual_v2")
