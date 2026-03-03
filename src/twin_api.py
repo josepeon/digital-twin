@@ -6,17 +6,20 @@ Endpoints:
   POST /ask-jose/voice  → Audio (MP3) response
   POST /ask-jose/stream → Streaming audio response
   GET  /health          → Health check
+  GET  /                → Web chat UI
 """
 
 from __future__ import annotations
 
 import os
 from contextlib import asynccontextmanager
+from pathlib import Path
 from typing import Any
 
 from fastapi import Depends, FastAPI, HTTPException, Request
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import Response, StreamingResponse
+from fastapi.responses import FileResponse, Response, StreamingResponse
+from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field
 
 from src.config import TWIN_API_KEY
@@ -57,6 +60,11 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
+# Static files for web UI
+_static_dir = Path(__file__).parent / "static"
+if _static_dir.exists():
+    app.mount("/static", StaticFiles(directory=str(_static_dir)), name="static")
 
 
 # ── Auth ───────────────────────────────────────────────────────────────────────
@@ -203,6 +211,17 @@ async def ask_jose_stream(req: AskRequest) -> StreamingResponse:
             "X-Response-Language": result["language"],
         },
     )
+
+
+# ── Web UI ─────────────────────────────────────────────────────────────────────
+
+@app.get("/", include_in_schema=False)
+async def web_ui():
+    """Serve the web chat interface."""
+    index = Path(__file__).parent / "static" / "index.html"
+    if index.exists():
+        return FileResponse(str(index), media_type="text/html")
+    raise HTTPException(status_code=404, detail="Web UI not found")
 
 
 # ── Run ────────────────────────────────────────────────────────────────────────
