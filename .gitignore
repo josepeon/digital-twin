@@ -1,13 +1,18 @@
-# Personal data — NEVER commit
-data/personal/
+# Personal data — raw message exports (large, sensitive)
+data/personal/raw/
+data/personal/processed/
 data/processed/
 raw/
 
-# Voice samples and IDs — biometric data
-data/personal/voice/
+# Voice recordings — biometric data, keep gitignored even in private repo
+data/personal/voice/en/
+data/personal/voice/es/
+data/personal/voice/pvc_recordings/
 
-# RAG index
-data/personal/rag_index/
+# These ARE tracked (needed for Railway deployment):
+#   data/personal/rag_index/       — ChromaDB embeddings (~128MB)
+#   data/personal/voice/voice_id_*.txt — ElevenLabs voice clone IDs
+#   data/personal/identity/        — jose_facts.json
 
 # Model weights
 models/
