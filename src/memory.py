@@ -7,17 +7,22 @@ server restarts. Falls back to in-memory if SQLite is unavailable.
 
 from __future__ import annotations
 
-import json
 import logging
+import os
 import sqlite3
 import time
 from pathlib import Path
-from typing import Any
 
 logger = logging.getLogger(__name__)
 
-# Default location — alongside the RAG index
-_DEFAULT_DB_PATH = Path(__file__).resolve().parent.parent / "data" / "personal" / "memory.db"
+# Default location — use MEMORY_DB_PATH env var if set (for Railway/Docker),
+# otherwise store alongside the RAG index for local dev.
+_DEFAULT_DB_PATH = Path(
+    os.environ.get(
+        "MEMORY_DB_PATH",
+        str(Path(__file__).resolve().parent.parent / "data" / "personal" / "memory.db"),
+    )
+)
 
 MAX_HISTORY_MESSAGES = 20  # sliding window — 10 exchanges
 SESSION_TTL_SECS = 3600 * 24  # 24h TTL per session

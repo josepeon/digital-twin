@@ -36,9 +36,14 @@ COPY data/personal/identity/ data/personal/identity/
 # Pre-download the sentence-transformers model so startup is fast
 RUN python -c "from sentence_transformers import SentenceTransformer; SentenceTransformer('all-MiniLM-L6-v2')"
 
-# Non-root user — make rag_index writable (ChromaDB needs write access for WAL)
-RUN useradd --create-home appuser && chown -R appuser:appuser data/personal/rag_index
+# Create writable dirs: ChromaDB WAL + SQLite memory
+RUN mkdir -p data/personal/rag_index data/personal/memory
+RUN useradd --create-home appuser && \
+    chown -R appuser:appuser data/personal/rag_index data/personal/memory
 USER appuser
+
+# Memory DB path — writable location for conversation history
+ENV MEMORY_DB_PATH=/app/data/personal/memory/memory.db
 
 EXPOSE 8000
 

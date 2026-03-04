@@ -1025,18 +1025,125 @@ The end result: an AI that doesn't just sound like Jose — it could pass for Jo
 
 ---
 
-## 12. Future Extensions
+## 12. Phase 8 — Future Extensions (Ready to Implement)
 
-| Extension | Description |
-|-----------|-------------|
-| **Phone call agent** | Twilio integration — the twin answers phone calls as Jose |
-| **Real-time learning** | Feed new conversations back to keep the twin current |
-| **Multi-persona** | Different modes (professional Jose, casual Jose, creative Jose) |
-| **Integration with OH** | Deploy as a personal AI agent that represents Jose |
-| **Memory layer** | Add RAG with Jose's documents for factual grounding |
-| **Autonomous agent** | Let the twin handle emails, messages, scheduling |
-| **Video avatar** | Pair voice clone with lip-synced video (HeyGen, Synthesia) |
-| **Voice-to-voice** | Full duplex: listen with Whisper → think with LLM → speak with ElevenLabs |
+Each extension below is scoped, prioritized, and ready to go when you say the word.
+
+---
+
+### 8a. Phone Call Agent (Twilio)  ⬜
+**Priority: HIGH** | Effort: Medium | Status: Not started
+
+Let people **call a phone number and talk to your twin** in real-time.
+
+**Architecture:**
+```
+Incoming call → Twilio → WebSocket stream
+  → Whisper STT (already built: /transcribe)
+  → PersonalityEngine.ask() (already built)
+  → ElevenLabs TTS stream (already built: voice.py)
+  → Twilio plays audio back to caller
+```
+
+**What to build:**
+- `src/twilio_handler.py` — Twilio webhook handlers (TwiML + Media Streams)
+- Twilio account + phone number (~$1/mo + $0.013/min)
+- Bidirectional WebSocket bridge: Twilio ↔ our WS endpoint
+- Interrupt handling (caller speaks mid-response → stop TTS, re-listen)
+
+**Key files to modify:** `src/twin_api.py` (add Twilio routes), `src/voice.py` (streaming chunks)
+
+---
+
+### 8b. Real-Time Learning  ⬜
+**Priority: HIGH** | Effort: Low | Status: Not started
+
+Auto-ingest new conversations so the twin stays current with Jose's life.
+
+**What to build:**
+- `scripts/ingest_new_data.py` — Watch for new exports, parse & add to ChromaDB
+- Incremental RAG update: append to existing collection without full rebuild
+- Cron job or manual trigger: `python scripts/ingest_new_data.py --source instagram`
+- Timestamp tracking: only process messages newer than last ingest
+
+**Key files to modify:** `scripts/ingest_new_data.py` (new), existing parsers in `scripts/`
+
+---
+
+### 8c. Integration with OH  ⬜
+**Priority: MEDIUM** | Effort: Medium | Status: Not started
+
+Deploy the twin as an AI agent inside OH's spatial commerce platform.
+
+**What to build:**
+- OH Agent SDK integration — wrap PersonalityEngine as an O-OH
+- Spatial presence: the twin appears as Jose's avatar in Unreal
+- Commerce context: answer questions about Nooon products with real inventory data
+- OH WebSocket protocol adapter
+
+**Key files to modify:** `src/oh_agent.py` (new), `src/personality_engine.py` (add product context)
+
+---
+
+### 8d. Autonomous Agent  ⬜
+**Priority: MEDIUM** | Effort: High | Status: Not started
+
+Let the twin handle emails, DMs, and scheduling on Jose's behalf.
+
+**What to build:**
+- `src/agent.py` — Agent loop with tool-use (reply to email, send DM, check calendar)
+- Gmail API integration for reading/drafting emails
+- Instagram/WhatsApp API for DM responses
+- Approval queue: twin drafts, Jose approves before sending
+- Safety guardrails: never send without approval, cap on actions/hour
+
+**Key files to modify:** `src/agent.py` (new), `src/twin_api.py` (approval endpoints)
+
+---
+
+### 8e. Video Avatar  ⬜
+**Priority: MEDIUM** | Effort: Low (API integration) | Status: Not started
+
+Add lip-synced video of Jose speaking the responses.
+
+**What to build:**
+- HeyGen or Synthesia API integration
+- Record 2-min calibration video of Jose speaking
+- `src/video.py` — Generate video from TTS audio + avatar
+- Frontend: show video player instead of / alongside audio
+
+**Key files to modify:** `src/video.py` (new), `src/static/index.html` (video player)
+
+---
+
+### 8f. Multi-Persona Modes  ⬜
+**Priority: LOW** | Effort: Low | Status: Not started
+
+Switch between Professional Jose, Casual Jose, Creative Jose.
+
+**What to build:**
+- System prompt variants per persona mode
+- API parameter: `mode: "professional" | "casual" | "creative"`
+- RAG filter: retrieve examples matching the requested register
+- UI toggle for mode selection
+
+**Key files to modify:** `src/personality_engine.py` (prompt variants), `src/twin_api.py` (mode param), `src/static/index.html` (mode selector)
+
+---
+
+### 8g. Run LoRA Fine-Tune  ⬜
+**Priority: LOW** | Effort: Low (pipeline is ready) | Status: Pipeline built, not executed
+
+Actually run the fine-tuning on a GPU and deploy the adapter.
+
+**What to do:**
+1. Upload `data/training/jose_train.jsonl` + `jose_val.jsonl` to cloud GPU
+2. Run `python scripts/finetune_lora.py --epochs 3 --rank 32`
+3. Export GGUF: `python scripts/finetune_lora.py --export-gguf`
+4. Host via Ollama locally or Together AI / RunPod for production
+5. Update `src/config.py` to point at fine-tuned model endpoint
+
+**Requirements:** CUDA GPU (>= 8GB VRAM), ~60 min on T4, ~20 min on A100
 
 ---
 
