@@ -14,13 +14,14 @@ from __future__ import annotations
 import json
 import logging
 import re
-from collections import defaultdict
 from pathlib import Path
 from typing import Any
 
 import chromadb
 from chromadb.utils import embedding_functions
 from groq import Groq
+
+from src.memory import MemoryStore
 
 logger = logging.getLogger(__name__)
 
@@ -37,29 +38,24 @@ from src.config import (
     RAG_TOP_K,
 )
 
-# ── Conversation Memory ───────────────────────────────────────────────────────
+# ── Conversation Memory (SQLite-backed) ───────────────────────────────────────
 
-MAX_HISTORY_MESSAGES = 20  # sliding window — 10 exchanges (user + assistant)
-
-# session_id → list of {"role": ..., "content": ...}
-_conversation_store: dict[str, list[dict[str, str]]] = defaultdict(list)
+_memory = MemoryStore()
 
 
 def add_message(session_id: str, role: str, content: str) -> None:
-    """Append a message to session history and trim to sliding window."""
-    _conversation_store[session_id].append({"role": role, "content": content})
-    if len(_conversation_store[session_id]) > MAX_HISTORY_MESSAGES:
-        _conversation_store[session_id] = _conversation_store[session_id][-MAX_HISTORY_MESSAGES:]
+    """Append a message to persistent session history."""
+    _memory.add_message(session_id, role, content)
 
 
 def get_history(session_id: str) -> list[dict[str, str]]:
     """Return conversation history for a session."""
-    return list(_conversation_store[session_id])
+    return _memory.get_history(session_id)
 
 
 def clear_session(session_id: str) -> None:
     """Clear a session's conversation history."""
-    _conversation_store.pop(session_id, None)
+    _memory.clear_session(session_id)
 
 # ── System Prompt ──────────────────────────────────────────────────────────────
 
@@ -248,6 +244,9 @@ class PersonalityEngine:
 
     # ── RAG Retrieval ──────────────────────────────────────────────────────
 
+    # Max results per source to prevent any single source from dominating
+    MAX_PER_SOURCE = 5
+
     def retrieve(
         self,
         query: str,
@@ -256,6 +255,9 @@ class PersonalityEngine:
         language: str | None = None,
     ) -> list[dict[str, Any]]:
         """Retrieve the most similar real Jose messages from the RAG index.
+
+        Over-fetches 3x results and applies source diversification so that
+        no single source (e.g., Instagram) dominates the few-shot examples.
 
         Args:
             query: The user's query.
@@ -271,6 +273,8 @@ class PersonalityEngine:
             return []
 
         n = n_results or RAG_TOP_K
+        # Over-fetch 3x for source diversification
+        fetch_n = min(n * 3, collection.count())
 
         # Build where filter
         where_filter: dict | None = None
@@ -288,28 +292,59 @@ class PersonalityEngine:
         try:
             results = collection.query(
                 query_texts=[query],
-                n_results=n,
+                n_results=fetch_n,
                 where=where_filter,
             )
         except Exception:
             # If filtered query fails (e.g., no matching docs), try unfiltered
             results = collection.query(
                 query_texts=[query],
-                n_results=n,
+                n_results=fetch_n,
             )
 
-        examples = []
-        if results and results["documents"] and results["documents"][0]:
-            for doc, meta in zip(results["documents"][0], results["metadatas"][0]):
-                examples.append({
-                    "text": doc,
-                    "context": meta.get("context", ""),
-                    "source": meta.get("source", "unknown"),
-                    "register": meta.get("register", "neutral"),
-                    "language": meta.get("language", "en"),
-                })
+        if not results or not results["documents"] or not results["documents"][0]:
+            return []
 
-        return examples
+        # Collect all candidates
+        candidates = []
+        for doc, meta in zip(results["documents"][0], results["metadatas"][0]):
+            candidates.append({
+                "text": doc,
+                "context": meta.get("context", ""),
+                "source": meta.get("source", "unknown"),
+                "register": meta.get("register", "neutral"),
+                "language": meta.get("language", "en"),
+            })
+
+        # Source diversification: round-robin pick with per-source cap
+        source_buckets: dict[str, list[dict]] = {}
+        for c in candidates:
+            source_buckets.setdefault(c["source"], []).append(c)
+
+        selected: list[dict] = []
+        seen_texts: set[str] = set()
+
+        # First pass: pick up to MAX_PER_SOURCE from each source (in relevance order)
+        for source, items in source_buckets.items():
+            for item in items[: self.MAX_PER_SOURCE]:
+                if item["text"] not in seen_texts:
+                    selected.append(item)
+                    seen_texts.add(item["text"])
+
+        # If we don't have enough, fill from remaining candidates by relevance
+        if len(selected) < n:
+            for c in candidates:
+                if c["text"] not in seen_texts:
+                    selected.append(c)
+                    seen_texts.add(c["text"])
+                    if len(selected) >= n:
+                        break
+
+        # Sort by original relevance order (position in candidates list)
+        candidate_order = {c["text"]: i for i, c in enumerate(candidates)}
+        selected.sort(key=lambda x: candidate_order.get(x["text"], 999))
+
+        return selected[:n]
 
     # ── Prompt Assembly ────────────────────────────────────────────────────
 

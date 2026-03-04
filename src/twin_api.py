@@ -20,14 +20,15 @@ from contextlib import asynccontextmanager
 from pathlib import Path
 from typing import Any
 
-from fastapi import Depends, FastAPI, HTTPException, Request, WebSocket, WebSocketDisconnect
+from fastapi import Depends, FastAPI, File, HTTPException, Request, UploadFile, WebSocket, WebSocketDisconnect
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse, Response, StreamingResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field
 
 from src.config import TWIN_API_KEY
-from src.personality_engine import PersonalityEngine, clear_session
+from src.memory import MemoryStore
+from src.personality_engine import PersonalityEngine, clear_session, _memory
 from src.voice import VoiceEngine
 
 # ── Lifespan ───────────────────────────────────────────────────────────────────
@@ -43,7 +44,15 @@ async def lifespan(app: FastAPI):
     global _engine, _voice
     _engine = PersonalityEngine()
     _voice = VoiceEngine()
+
+    # Clean up expired sessions on startup
+    expired = _memory.cleanup_expired()
+    if expired:
+        import logging
+        logging.getLogger(__name__).info("Cleaned up %d expired sessions", expired)
+
     yield
+    _memory.close()
     _engine = None
     _voice = None
 
@@ -219,6 +228,46 @@ async def ask_jose_stream(req: AskRequest) -> StreamingResponse:
             "X-Response-Language": result["language"],
         },
     )
+
+
+# ── Speech-to-Text ─────────────────────────────────────────────────────────────
+
+
+@app.post("/transcribe", dependencies=[Depends(verify_api_key)])
+async def transcribe_audio(audio: UploadFile = File(...)):
+    """Transcribe audio to text using Groq Whisper.
+
+    Accepts audio files (webm, mp3, wav, m4a, ogg).
+    Returns: {"text": "transcribed text", "language": "en"}
+    """
+    if _engine is None:
+        raise HTTPException(status_code=503, detail="Engine not initialized")
+
+    # Read audio bytes
+    audio_bytes = await audio.read()
+    if len(audio_bytes) == 0:
+        raise HTTPException(status_code=400, detail="Empty audio file")
+    if len(audio_bytes) > 25 * 1024 * 1024:  # 25MB limit
+        raise HTTPException(status_code=413, detail="Audio file too large (25MB max)")
+
+    # Transcribe with Groq Whisper
+    groq = _engine._get_groq()
+    loop = asyncio.get_event_loop()
+
+    try:
+        filename = audio.filename or "recording.webm"
+        result = await loop.run_in_executor(
+            None,
+            lambda: groq.audio.transcriptions.create(
+                file=(filename, audio_bytes),
+                model="whisper-large-v3",
+                response_format="json",
+            ),
+        )
+        text = result.text.strip() if result.text else ""
+        return {"text": text, "language": "auto"}
+    except Exception as e:
+        raise HTTPException(status_code=502, detail=f"Transcription failed: {e}")
 
 
 # ── WebSocket Streaming ────────────────────────────────────────────────────────
