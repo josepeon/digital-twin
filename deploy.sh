@@ -38,6 +38,11 @@ echo "  [2/4] Copying files..."
 # Application code
 cp "$PROJECT_ROOT"/src/*.py "$STAGING_DIR/src/"
 
+# Static files (UI, PWA assets)
+if [[ -d "$PROJECT_ROOT/src/static" ]]; then
+    cp -r "$PROJECT_ROOT/src/static" "$STAGING_DIR/src/static/"
+fi
+
 # Config files
 cp "$PROJECT_ROOT/requirements.txt" "$STAGING_DIR/"
 cp "$PROJECT_ROOT/pyproject.toml" "$STAGING_DIR/"
@@ -63,6 +68,7 @@ echo "  [3/4] Verifying staging directory..."
 ERRORS=0
 
 for f in src/personality_engine.py src/twin_api.py src/config.py src/voice.py \
+         src/memory.py src/static/index.html src/static/manifest.json src/static/sw.js \
          requirements.txt Dockerfile railway.toml pyproject.toml \
          data/personal/identity/jose_facts.json; do
     if [[ ! -f "$STAGING_DIR/$f" ]]; then
