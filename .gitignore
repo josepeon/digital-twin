@@ -1,10 +1,10 @@
-# Personal data — raw message exports (large, sensitive)
+# ── Personal data (large, sensitive) ───────────────────────────────────────────
 data/personal/raw/
 data/personal/processed/
-data/processed/
-raw/
+data/personal/memory.db*
+data/training/
 
-# Voice recordings — biometric data, keep gitignored even in private repo
+# Voice recordings — biometric data
 data/personal/voice/en/
 data/personal/voice/es/
 data/personal/voice/pvc_recordings/
@@ -14,15 +14,15 @@ data/personal/voice/pvc_recordings/
 #   data/personal/voice/voice_id_*.txt — ElevenLabs voice clone IDs
 #   data/personal/identity/        — jose_facts.json
 
-# Model weights
+# ── Build artifacts ───────────────────────────────────────────────────────────
 models/
 
-# Environment
+# ── Environment ───────────────────────────────────────────────────────────────
 .env
 .env.*
 !.env.example
 
-# Python
+# ── Python ────────────────────────────────────────────────────────────────────
 __pycache__/
 *.py[cod]
 *$py.class
@@ -31,31 +31,29 @@ dist/
 build/
 *.egg
 
-# Virtual environments
+# ── Virtual environments ──────────────────────────────────────────────────────
 .venv/
 venv/
 
-# IDE
+# ── IDE ───────────────────────────────────────────────────────────────────────
 .vscode/
 .idea/
 *.swp
 *.swo
 *~
 
-# OS
+# ── OS ────────────────────────────────────────────────────────────────────────
 .DS_Store
 Thumbs.db
 
-# Pytest
+# ── Testing ───────────────────────────────────────────────────────────────────
 .pytest_cache/
 htmlcov/
 .coverage
 
-# Logs
+# ── Logs ──────────────────────────────────────────────────────────────────────
 *.log
 logs/
 
-# Jupyter
+# ── Jupyter ───────────────────────────────────────────────────────────────────
 .ipynb_checkpoints/
-data/personal/memory.db*
-data/training/

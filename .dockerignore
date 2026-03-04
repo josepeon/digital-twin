@@ -6,8 +6,7 @@
 !pyproject.toml
 !requirements.txt
 
-# Data needed at runtime (gitignored but needed in Docker)
-# Must whitelist parent dirs for nested paths to work
+# Data needed at runtime (gitignored but included via deploy.sh staging)
 !data/
 data/*
 !data/personal/
@@ -21,7 +20,7 @@ data/personal/voice/*
 !data/personal/identity/
 !data/personal/identity/**
 
-# Exclude unnecessary files from whitelisted dirs
+# Exclude build artifacts from whitelisted dirs
 **/__pycache__/
 **/*.py[cod]
 **/.DS_Store

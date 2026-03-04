@@ -1,7 +1,7 @@
 [project]
 name = "digital-twin"
-version = "0.1.0"
-description = "AI digital twin of Jose Peon — RAG + Groq 70B + ElevenLabs dual-voice clone"
+version = "1.0.0"
+description = "AI digital twin of Jose Peon — RAG + Groq 70B + ElevenLabs dual-voice clone + Whisper STT + WebSocket"
 requires-python = ">=3.11"
 
 [tool.ruff]
@@ -13,4 +13,3 @@ select = ["E", "F", "I", "W"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
-asyncio_mode = "auto"
