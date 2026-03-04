@@ -8,6 +8,7 @@ Usage:
     python -m tests.eval_identity                 # full eval
     python -m tests.eval_identity --quick          # 10 questions only
     python -m tests.eval_identity --api URL        # test deployed API
+    python -m tests.eval_identity --style          # add LLM style judge
 """
 
 from __future__ import annotations
@@ -414,6 +415,138 @@ def score_response(question_def: dict, response: str) -> QuestionResult:
     )
 
 
+# ── LLM Style Judge ────────────────────────────────────────────────────────────
+
+STYLE_JUDGE_PROMPT = """\
+You are a style evaluator for a digital twin of Jose Peon — a 24-year-old Cuban entrepreneur, fashion engineer, and software engineer living in New York.
+
+Jose's authentic voice characteristics:
+- SHORT responses (1-3 sentences). Never long-winded or preachy.
+- Confident, enthusiastic, optimistic. States things with certainty.
+- Casual tone: uses "bro", "man", "dale", "jaja" naturally.
+- NEVER uses AI phrases like "absolutely", "I appreciate that", "feel free to", "I'd love to", "I'm all ears", "let me know if there's anything else".
+- No emojis. This is voice-first.
+- Cuban Spanish when speaking Spanish (asere, dale, que bolá).
+- Talks about OH, Nooon, building things with genuine excitement — not rehearsed corporate speak.
+- Sounds like a real 24-year-old, not a motivational speaker or an AI assistant.
+
+Rate the following response on a scale of 1-5:
+1 = Clearly an AI assistant (polite, generic, uses AI phrases, too long)
+2 = Mostly AI-sounding with some human touches
+3 = Mixed — some authentic Jose elements but also AI-ish patterns
+4 = Mostly sounds like a real person, minor AI-isms
+5 = Perfectly authentic Jose voice — short, confident, natural
+
+Question asked: "{question}"
+Response: "{response}"
+
+Respond with ONLY a JSON object:
+{{"score": <1-5>, "reason": "<brief explanation>"}}"""
+
+
+@dataclass
+class StyleResult:
+    question: str
+    response: str
+    score: int  # 1-5
+    reason: str
+
+
+def run_style_eval(
+    results: list[dict],
+    groq_api_key: str | None = None,
+) -> dict[str, Any]:
+    """Run LLM-as-judge style evaluation on existing responses.
+
+    Args:
+        results: List of dicts with "question" and "response"
+        groq_api_key: Groq API key (falls back to env)
+    """
+    from groq import Groq
+
+    api_key = groq_api_key or __import__("os").environ.get("GROQ_API_KEY", "")
+    if not api_key:
+        try:
+            from src.config import GROQ_API_KEY
+            api_key = GROQ_API_KEY
+        except ImportError:
+            pass
+
+    if not api_key:
+        print("  ⚠️  No GROQ_API_KEY — skipping style eval")
+        return {}
+
+    client = Groq(api_key=api_key)
+    style_results: list[StyleResult] = []
+
+    print("\n  ── LLM Style Judge ──")
+    for i, r in enumerate(results, 1):
+        question = r["question"]
+        response = r["response"]
+
+        if response.startswith("[ERROR"):
+            continue
+
+        prompt = STYLE_JUDGE_PROMPT.format(question=question, response=response)
+
+        try:
+            judge_resp = client.chat.completions.create(
+                model="llama-3.3-70b-versatile",
+                messages=[{"role": "user", "content": prompt}],
+                temperature=0.0,
+                max_tokens=150,
+            )
+            raw = judge_resp.choices[0].message.content.strip()
+
+            # Parse JSON from response
+            json_match = re.search(r"\{.*\}", raw, re.DOTALL)
+            if json_match:
+                parsed = json.loads(json_match.group())
+                score = int(parsed.get("score", 3))
+                reason = parsed.get("reason", "")
+            else:
+                score = 3
+                reason = f"Could not parse: {raw[:100]}"
+
+        except Exception as e:
+            score = 3
+            reason = f"Judge error: {e}"
+
+        sr = StyleResult(question=question, response=response, score=score, reason=reason)
+        style_results.append(sr)
+
+        icon = "🟢" if score >= 4 else "🟡" if score == 3 else "🔴"
+        print(f"  [{i}/{len(results)}] {icon} {score}/5 — {reason[:80]}")
+
+        # Rate limit: Groq allows ~30 req/min on free tier
+        time.sleep(0.5)
+
+    if not style_results:
+        return {}
+
+    avg_score = sum(sr.score for sr in style_results) / len(style_results)
+
+    # Score distribution
+    dist = {s: sum(1 for sr in style_results if sr.score == s) for s in range(1, 6)}
+
+    grade_map = {5: "A+", 4.5: "A", 4.0: "A-", 3.5: "B+", 3.0: "B", 2.5: "B-", 2.0: "C", 1.5: "D", 1.0: "F"}
+    grade = "F"
+    for threshold, g in sorted(grade_map.items(), reverse=True):
+        if avg_score >= threshold:
+            grade = g
+            break
+
+    return {
+        "style_avg_score": round(avg_score, 2),
+        "style_grade": grade,
+        "style_distribution": dist,
+        "style_details": [
+            {"question": sr.question, "score": sr.score, "reason": sr.reason}
+            for sr in style_results
+        ],
+    }
+
+
 # ── Runner ─────────────────────────────────────────────────────────────────────
 
 def run_identity_eval(
@@ -516,6 +649,7 @@ def main():
     parser.add_argument("--api", type=str, default=None, help="API URL (e.g. https://...railway.app)")
     parser.add_argument("--api-key", type=str, default=None, help="API key for remote API")
     parser.add_argument("--quick", action="store_true", help="Only run 10 questions")
+    parser.add_argument("--style", action="store_true", help="Run LLM-as-judge style evaluation")
     parser.add_argument("--output", type=str, default=None, help="Save JSON results to file")
     args = parser.parse_args()
 
@@ -549,6 +683,20 @@ def main():
         bar = "█" * int(score * 20) + "░" * (20 - int(score * 20))
         print(f"    {cat:20s} {bar} {score:.0%}")
     print("═" * 50)
+
+    # Style evaluation (LLM-as-judge)
+    if args.style:
+        style_summary = run_style_eval(summary["results"])
+        if style_summary:
+            summary["style"] = style_summary
+            print("\n" + "═" * 50)
+            print(f"  Style Grade:      {style_summary['style_grade']} ({style_summary['style_avg_score']}/5)")
+            print(f"  Distribution:     ", end="")
+            for s in range(5, 0, -1):
+                count = style_summary["style_distribution"].get(s, 0)
+                print(f"{s}★={count}  ", end="")
+            print()
+            print("═" * 50)
 
     if args.output:
         out_path = Path(args.output)

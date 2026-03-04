@@ -1037,3 +1037,63 @@ The end result: an AI that doesn't just sound like Jose — it could pass for Jo
 | **Autonomous agent** | Let the twin handle emails, messages, scheduling |
 | **Video avatar** | Pair voice clone with lip-synced video (HeyGen, Synthesia) |
 | **Voice-to-voice** | Full duplex: listen with Whisper → think with LLM → speak with ElevenLabs |
+
+---
+
+## 13. Phase 7 — Production Polish & Advanced Features
+
+**Status: ✅ IMPLEMENTED**
+
+Seven improvements to push the digital twin toward production quality:
+
+### 7a. WebSocket Frontend Integration ✅
+- Rewrote `src/static/index.html` with WebSocket-primary communication
+- Auto-reconnect with 3s retry, REST fallback if WS unavailable
+- Status indicator (purple dot = WebSocket, green = REST)
+- Session-based conversation via `crypto.randomUUID()`
+
+### 7b. Voice Input (Speech-to-Text) ✅
+- Added `/transcribe` endpoint to `twin_api.py`
+- Uses Groq Whisper `whisper-large-v3` for fast transcription
+- Frontend captures audio via `MediaRecorder` (webm/opus format)
+- Mic button in UI with recording state indicator
+- 25MB file size limit
+
+### 7c. Persistent Memory (SQLite) ✅
+- Created `src/memory.py` — `MemoryStore` class backed by SQLite
+- Replaces in-memory `defaultdict` in `personality_engine.py`
+- WAL mode for concurrent reads, session TTL (24h), auto-cleanup on startup
+- Stored at `data/personal/memory.db`, survives Railway redeploys
+- Same API: `add_message()`, `get_history()`, `clear_session()`
+
+### 7d. Style Evaluation with LLM Judge ✅
+- Added `--style` flag to `tests/eval_identity.py`
+- Groq LLM-as-judge evaluates each response on a 1-5 authenticity scale
+- Rubric: Does this sound like a 24-year-old Cuban entrepreneur or an AI?
+- Outputs grade (A+ to F), score distribution, per-question reasoning
+
+### 7e. RAG Data Rebalancing ✅
+- Problem: Instagram was 89% of RAG index (24,317 of 27,266 docs)
+- Solution: Source diversification in `PersonalityEngine.retrieve()`
+- Over-fetches 3x results, caps each source at `MAX_PER_SOURCE = 5`
+- Round-robin selection ensures ChatGPT, iMessage, WhatsApp get fair representation
+- Before: 14/15 results from Instagram → After: 9 IG, 5 ChatGPT, 1 iMessage
+
+### 7f. PWA / Mobile Installable ✅
+- Created `manifest.json` (standalone display, dark theme, Jose branding)
+- Created `sw.js` service worker (network-first HTML, cache-first static)
+- Generated gradient icons (192px, 512px) via `scripts/gen_icons.py`
+- Mobile-optimized CSS with `100dvh`, touch targets, safe area insets
+
+### 7g. LoRA Fine-Tuning Pipeline ✅
+- `scripts/export_training_data.py` — Exports 19,390 chat-format pairs from all sources
+  - Instagram: 16,364 | ChatGPT: 2,490 | iMessage: 404 | WhatsApp: 132
+  - 90/10 train/val split, quality filtering (length, emoji-only, generic)
+- `scripts/finetune_lora.py` — Full unsloth pipeline for Llama 3.1 8B
+  - 4-bit quantized LoRA (rank 16, target all projection layers)
+  - Cosine LR scheduler, AdamW 8-bit, gradient checkpointing
+  - Optional GGUF export for local inference (Ollama, llama.cpp)
+  - Test mode with sample queries
+
+### Dependencies Added
+- `python-multipart>=0.0.9` — Required for file upload (STT endpoint)

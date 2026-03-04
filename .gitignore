@@ -57,3 +57,5 @@ logs/
 
 # Jupyter
 .ipynb_checkpoints/
+data/personal/memory.db*
+data/training/

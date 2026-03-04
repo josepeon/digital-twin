@@ -2,8 +2,13 @@
 <html lang="en">
 <head>
     <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
     <title>Jose Peon — Digital Twin</title>
+    <link rel="manifest" href="/static/manifest.json">
+    <meta name="theme-color" content="#0d1117">
+    <meta name="apple-mobile-web-app-capable" content="yes">
+    <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+    <link rel="apple-touch-icon" href="/static/icon-192.png">
     <style>
         :root {
             --bg: #0d1117;
@@ -26,6 +31,7 @@
             background: var(--bg);
             color: var(--text);
             height: 100vh;
+            height: 100dvh;
             display: flex;
             flex-direction: column;
         }
@@ -79,6 +85,7 @@
         }
 
         .header .status .dot.online { background: var(--green); }
+        .header .status .dot.ws { background: #a371f7; }
 
         .header .settings-btn {
             background: none;
@@ -185,17 +192,6 @@
         .message .meta .lang-badge.es { color: #f0883e; }
         .message .meta .lang-badge.en { color: var(--accent); }
 
-        .message .voice-btn {
-            background: none;
-            border: none;
-            color: var(--text-dim);
-            cursor: pointer;
-            font-size: 14px;
-            padding: 0;
-        }
-
-        .message .voice-btn:hover { color: var(--accent); }
-
         /* Typing indicator */
         .typing {
             align-self: flex-start;
@@ -281,6 +277,29 @@
         .input-area button:hover { background: var(--accent-hover); }
         .input-area button:disabled { opacity: 0.4; cursor: not-allowed; }
 
+        .input-area .mic-btn {
+            background: none;
+            border: 1px solid var(--border);
+            color: var(--text-dim);
+            font-size: 18px;
+        }
+
+        .input-area .mic-btn:hover {
+            border-color: var(--accent);
+            color: var(--text);
+        }
+
+        .input-area .mic-btn.recording {
+            border-color: var(--red);
+            color: var(--red);
+            animation: pulse-mic 1s infinite;
+        }
+
+        @keyframes pulse-mic {
+            0%, 100% { opacity: 1; }
+            50% { opacity: 0.5; }
+        }
+
         /* Welcome */
         .welcome {
             text-align: center;
@@ -291,6 +310,17 @@
         .welcome .emoji { font-size: 48px; margin-bottom: 16px; }
         .welcome h2 { color: var(--text); font-size: 20px; margin-bottom: 8px; }
         .welcome p { max-width: 400px; margin: 0 auto; line-height: 1.6; font-size: 14px; }
+
+        /* Connection badge */
+        .conn-badge {
+            font-size: 10px;
+            padding: 2px 6px;
+            border-radius: 3px;
+            font-weight: 600;
+            text-transform: uppercase;
+        }
+        .conn-badge.ws { background: rgba(163,113,247,0.2); color: #a371f7; }
+        .conn-badge.rest { background: rgba(88,166,255,0.2); color: var(--accent); }
 
         /* Scrollbar */
         .messages::-webkit-scrollbar { width: 6px; }
@@ -303,22 +333,24 @@
             .header { padding: 12px 16px; }
             .messages { padding: 16px; }
             .input-area { padding: 12px 16px; }
+            .settings-panel input[type="text"],
+            .settings-panel input[type="password"] { width: 180px; }
         }
     </style>
 </head>
 <body>
     <!-- Header -->
     <div class="header">
-        <div class="avatar">🧬</div>
+        <div class="avatar">JP</div>
         <div class="info">
             <h1>Jose Peon</h1>
-            <div class="subtitle">Digital Twin · AI Replica</div>
+            <div class="subtitle">Digital Twin</div>
         </div>
         <div class="status">
             <div class="dot" id="statusDot"></div>
             <span id="statusText">Connecting...</span>
         </div>
-        <button class="settings-btn" onclick="toggleSettings()">⚙ Settings</button>
+        <button class="settings-btn" onclick="toggleSettings()">Settings</button>
     </div>
 
     <!-- Settings -->
@@ -339,9 +371,9 @@
     <!-- Messages -->
     <div class="messages" id="messages">
         <div class="welcome" id="welcome">
-            <div class="emoji">🧬</div>
-            <h2>Chat with Jose</h2>
-            <p>Ask anything — in English or Spanish. The twin responds using Jose's real communication style, powered by RAG over 27K+ personal messages.</p>
+            <div class="emoji">JP</div>
+            <h2>Talk to Jose</h2>
+            <p>Ask anything — in English or Spanish. Type or hold the mic to speak. Powered by RAG over 27K+ real messages.</p>
         </div>
     </div>
 
@@ -352,12 +384,14 @@
 
     <!-- Input -->
     <div class="input-area">
+        <button class="mic-btn" id="micBtn" onmousedown="startRecording()" onmouseup="stopRecording()" ontouchstart="startRecording()" ontouchend="stopRecording()" title="Hold to speak">🎤</button>
         <textarea id="input" placeholder="Message Jose..." rows="1"
                   onkeydown="handleKey(event)" oninput="autoResize(this)"></textarea>
         <button id="sendBtn" onclick="sendMessage()">↑</button>
     </div>
 
     <script>
+        // ── DOM refs ──────────────────────────────────────────────────────
         const messagesEl = document.getElementById('messages');
         const inputEl = document.getElementById('input');
         const sendBtn = document.getElementById('sendBtn');
@@ -365,11 +399,18 @@
         const welcomeEl = document.getElementById('welcome');
         const statusDot = document.getElementById('statusDot');
         const statusText = document.getElementById('statusText');
+        const micBtn = document.getElementById('micBtn');
 
-        let conversationHistory = [];
+        // ── State ─────────────────────────────────────────────────────────
         let sessionId = crypto.randomUUID();
+        let ws = null;
+        let wsReady = false;
+        let wsQueue = [];  // queued messages while connecting
+        let mediaRecorder = null;
+        let audioChunks = [];
+        let isRecording = false;
 
-        // Auto-resize textarea
+        // ── Config ────────────────────────────────────────────────────────
         function autoResize(el) {
             el.style.height = 'auto';
             el.style.height = Math.min(el.scrollHeight, 120) + 'px';
@@ -394,23 +435,248 @@
             };
         }
 
-        // Check health on load
-        async function checkHealth() {
+        // ── WebSocket Connection ──────────────────────────────────────────
+        function getWsUrl() {
             const config = getConfig();
-            try {
-                const resp = await fetch(`${config.apiUrl}/health`);
-                const data = await resp.json();
-                if (data.status === 'ok') {
-                    statusDot.classList.add('online');
-                    statusText.textContent = `Online · ${data.groq_model}`;
-                } else {
-                    statusText.textContent = 'Degraded';
+            const httpUrl = config.apiUrl;
+            return httpUrl.replace(/^http/, 'ws') + '/ws';
+        }
+
+        function connectWebSocket() {
+            if (ws && (ws.readyState === WebSocket.OPEN || ws.readyState === WebSocket.CONNECTING)) {
+                return;
+            }
+
+            const url = getWsUrl();
+            ws = new WebSocket(url);
+            wsReady = false;
+
+            ws.onopen = () => {
+                console.log('WebSocket connected');
+                // Send auth if key is set
+                const config = getConfig();
+                if (config.apiKey) {
+                    ws.send(JSON.stringify({ type: 'auth', key: config.apiKey }));
                 }
-            } catch {
-                statusText.textContent = 'Offline';
+                wsReady = true;
+                statusDot.className = 'dot ws';
+                statusText.textContent = 'Connected (WS)';
+
+                // Flush queued messages
+                while (wsQueue.length > 0) {
+                    const msg = wsQueue.shift();
+                    ws.send(JSON.stringify(msg));
+                }
+            };
+
+            ws.onmessage = (event) => {
+                const msg = JSON.parse(event.data);
+                handleWsMessage(msg);
+            };
+
+            ws.onclose = () => {
+                console.log('WebSocket closed');
+                wsReady = false;
+                statusDot.className = 'dot';
+                statusText.textContent = 'Disconnected';
+                // Reconnect after 3s
+                setTimeout(connectWebSocket, 3000);
+            };
+
+            ws.onerror = (err) => {
+                console.error('WebSocket error:', err);
+                wsReady = false;
+            };
+        }
+
+        let pendingStart = null;  // performance.now() when query sent
+
+        function handleWsMessage(msg) {
+            if (msg.type === 'error') {
+                typingEl.classList.remove('show');
+                addMessage('jose', `Error: ${msg.content}`);
+                sendBtn.disabled = false;
+                return;
+            }
+
+            if (msg.type === 'text' && msg.done) {
+                typingEl.classList.remove('show');
+                const elapsed = pendingStart ? ((performance.now() - pendingStart) / 1000).toFixed(1) : '?';
+                pendingStart = null;
+                addMessage('jose', msg.content, {
+                    language: msg.language,
+                    register: msg.register || '—',
+                    examples_used: msg.examples_used || '—',
+                    elapsed,
+                });
+                sendBtn.disabled = false;
+                return;
+            }
+
+            if (msg.type === 'audio') {
+                // Decode base64 audio and play
+                const audioData = Uint8Array.from(atob(msg.content), c => c.charCodeAt(0));
+                const blob = new Blob([audioData], { type: 'audio/mpeg' });
+                const url = URL.createObjectURL(blob);
+                const audio = new Audio(url);
+                audio.play().catch(() => {});
+                return;
             }
         }
 
+        // ── Send Message (WebSocket primary, REST fallback) ──────────────
+        async function sendMessage() {
+            const query = inputEl.value.trim();
+            if (!query) return;
+
+            inputEl.value = '';
+            inputEl.style.height = 'auto';
+            sendBtn.disabled = true;
+
+            if (welcomeEl) welcomeEl.style.display = 'none';
+            addMessage('user', query);
+
+            typingEl.classList.add('show');
+            messagesEl.scrollTop = messagesEl.scrollHeight;
+
+            const config = getConfig();
+            pendingStart = performance.now();
+
+            // Try WebSocket first
+            if (ws && ws.readyState === WebSocket.OPEN) {
+                const msg = {
+                    query,
+                    session_id: sessionId,
+                    voice: config.voice,
+                };
+                ws.send(JSON.stringify(msg));
+                return;  // Response handled in handleWsMessage
+            }
+
+            // Fallback to REST
+            try {
+                const headers = { 'Content-Type': 'application/json' };
+                if (config.apiKey) {
+                    headers['Authorization'] = `Bearer ${config.apiKey}`;
+                }
+                const body = { query, session_id: sessionId };
+
+                const resp = await fetch(`${config.apiUrl}/ask-jose`, {
+                    method: 'POST',
+                    headers,
+                    body: JSON.stringify(body),
+                });
+
+                if (!resp.ok) {
+                    throw new Error(resp.status === 401 ? 'Invalid API key — set it in Settings' : `Error ${resp.status}`);
+                }
+
+                const data = await resp.json();
+                const elapsed = ((performance.now() - pendingStart) / 1000).toFixed(1);
+                pendingStart = null;
+
+                typingEl.classList.remove('show');
+                addMessage('jose', data.response, {
+                    language: data.language,
+                    register: data.style_register,
+                    examples_used: data.examples_used,
+                    elapsed,
+                });
+
+                // Voice via REST
+                if (config.voice) {
+                    const audioResp = await fetch(`${config.apiUrl}/ask-jose/voice`, {
+                        method: 'POST',
+                        headers,
+                        body: JSON.stringify(body),
+                    });
+                    if (audioResp.ok) {
+                        const blob = await audioResp.blob();
+                        const audio = new Audio(URL.createObjectURL(blob));
+                        audio.play().catch(() => {});
+                    }
+                }
+            } catch (err) {
+                typingEl.classList.remove('show');
+                addMessage('jose', `Error: ${err.message}`);
+            }
+
+            sendBtn.disabled = false;
+            inputEl.focus();
+        }
+
+        // ── Voice Input (STT) ─────────────────────────────────────────────
+        async function startRecording() {
+            if (isRecording) return;
+
+            try {
+                const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+                mediaRecorder = new MediaRecorder(stream, { mimeType: 'audio/webm;codecs=opus' });
+                audioChunks = [];
+
+                mediaRecorder.ondataavailable = (e) => {
+                    if (e.data.size > 0) audioChunks.push(e.data);
+                };
+
+                mediaRecorder.onstop = async () => {
+                    stream.getTracks().forEach(t => t.stop());
+                    if (audioChunks.length === 0) return;
+
+                    const audioBlob = new Blob(audioChunks, { type: 'audio/webm' });
+                    micBtn.classList.remove('recording');
+                    isRecording = false;
+
+                    // Transcribe
+                    await transcribeAudio(audioBlob);
+                };
+
+                mediaRecorder.start();
+                isRecording = true;
+                micBtn.classList.add('recording');
+            } catch (err) {
+                console.error('Mic error:', err);
+                alert('Microphone access denied');
+            }
+        }
+
+        function stopRecording() {
+            if (mediaRecorder && isRecording) {
+                mediaRecorder.stop();
+            }
+        }
+
+        async function transcribeAudio(blob) {
+            const config = getConfig();
+            const headers = {};
+            if (config.apiKey) {
+                headers['Authorization'] = `Bearer ${config.apiKey}`;
+            }
+
+            const formData = new FormData();
+            formData.append('audio', blob, 'recording.webm');
+
+            try {
+                const resp = await fetch(`${config.apiUrl}/transcribe`, {
+                    method: 'POST',
+                    headers,
+                    body: formData,
+                });
+
+                if (!resp.ok) throw new Error(`Transcription failed: ${resp.status}`);
+
+                const data = await resp.json();
+                if (data.text && data.text.trim()) {
+                    inputEl.value = data.text.trim();
+                    sendMessage();
+                }
+            } catch (err) {
+                console.error('STT error:', err);
+                // Fallback: put error in input
+                addMessage('jose', 'Could not transcribe audio. Try typing instead.');
+            }
+        }
+
+        // ── UI Helpers ────────────────────────────────────────────────────
         function addMessage(role, text, meta = null) {
             if (welcomeEl) welcomeEl.style.display = 'none';
 
@@ -425,7 +691,7 @@
                     <div class="meta">
                         <span class="lang-badge ${langClass}">${meta.language}</span>
                         <span>${meta.register}</span>
-                        <span>${meta.examples_used} examples</span>
+                        <span>${meta.examples_used} ex</span>
                         <span>${meta.elapsed}s</span>
                     </div>`;
             }
@@ -433,123 +699,48 @@
             div.innerHTML = html;
             messagesEl.appendChild(div);
             messagesEl.scrollTop = messagesEl.scrollHeight;
-
-            // Play voice if enabled
-            if (role === 'jose' && meta && meta.audio_url) {
-                const audio = new Audio(meta.audio_url);
-                audio.play().catch(() => {});
-            }
         }
 
-        async function sendMessage() {
-            const query = inputEl.value.trim();
-            if (!query) return;
-
-            inputEl.value = '';
-            inputEl.style.height = 'auto';
-            sendBtn.disabled = true;
-
-            addMessage('user', query);
-            conversationHistory.push({ role: 'user', content: query });
-
-            // Show typing
-            typingEl.classList.add('show');
-            messagesEl.scrollTop = messagesEl.scrollHeight;
-
+        // ── Health Check ──────────────────────────────────────────────────
+        async function checkHealth() {
             const config = getConfig();
-            const start = performance.now();
-
             try {
-                const headers = { 'Content-Type': 'application/json' };
-                if (config.apiKey) {
-                    headers['Authorization'] = `Bearer ${config.apiKey}`;
-                }
-
-                // Use session_id for server-side conversation memory
-                const body = { query, session_id: sessionId };
-
-                if (config.voice) {
-                    // Get text response first
-                    const textResp = await fetch(`${config.apiUrl}/ask-jose`, {
-                        method: 'POST',
-                        headers,
-                        body: JSON.stringify(body),
-                    });
-
-                    if (!textResp.ok) {
-                        throw new Error(textResp.status === 401 ? 'Invalid API key' : `Error ${textResp.status}`);
-                    }
-
-                    const textData = await textResp.json();
-                    const elapsed = ((performance.now() - start) / 1000).toFixed(1);
-
-                    conversationHistory.push({ role: 'jose', content: textData.response });
-
-                    // Get audio separately
-                    const audioResp = await fetch(`${config.apiUrl}/ask-jose/voice`, {
-                        method: 'POST',
-                        headers,
-                        body: JSON.stringify(body),
-                    });
-
-                    let audioUrl = null;
-                    if (audioResp.ok) {
-                        const blob = await audioResp.blob();
-                        audioUrl = URL.createObjectURL(blob);
-                        const audio = new Audio(audioUrl);
-                        audio.play().catch(() => {});
-                    }
-
-                    typingEl.classList.remove('show');
-                    addMessage('jose', textData.response, {
-                        language: textData.language,
-                        register: textData.style_register,
-                        examples_used: textData.examples_used,
-                        elapsed,
-                    });
+                const resp = await fetch(`${config.apiUrl}/health`);
+                const data = await resp.json();
+                if (data.status === 'ok') {
+                    statusDot.classList.add('online');
+                    statusText.textContent = `Online`;
+                    // Now try WebSocket upgrade
+                    connectWebSocket();
                 } else {
-                    const resp = await fetch(`${config.apiUrl}/ask-jose`, {
-                        method: 'POST',
-                        headers,
-                        body: JSON.stringify(body),
-                    });
-
-                    if (!resp.ok) {
-                        throw new Error(resp.status === 401 ? 'Invalid API key — set it in Settings' : `Error ${resp.status}`);
-                    }
-
-                    const data = await resp.json();
-                    const elapsed = ((performance.now() - start) / 1000).toFixed(1);
-
-                    conversationHistory.push({ role: 'jose', content: data.response });
-
-                    typingEl.classList.remove('show');
-                    addMessage('jose', data.response, {
-                        language: data.language,
-                        register: data.style_register,
-                        examples_used: data.examples_used,
-                        elapsed,
-                    });
+                    statusText.textContent = 'Degraded';
                 }
-            } catch (err) {
-                typingEl.classList.remove('show');
-                addMessage('jose', `Error: ${err.message}`);
+            } catch {
+                statusText.textContent = 'Offline (REST)';
             }
-
-            sendBtn.disabled = false;
-            inputEl.focus();
         }
 
-        // Init
+        // ── Init ──────────────────────────────────────────────────────────
         checkHealth();
         inputEl.focus();
 
-        // Load API key from localStorage
+        // Persist API key
         const savedKey = localStorage.getItem('twin_api_key');
         if (savedKey) document.getElementById('apiKey').value = savedKey;
         document.getElementById('apiKey').addEventListener('change', (e) => {
             localStorage.setItem('twin_api_key', e.target.value);
         });
+
+        // Reconnect WS when settings change
+        document.getElementById('apiUrl').addEventListener('change', () => {
+            if (ws) ws.close();
+            connectWebSocket();
+        });
+
+        // Register service worker for PWA
+        if ('serviceWorker' in navigator) {
+            navigator.serviceWorker.register('/static/sw.js').catch(() => {});
+        }
     </script>
 </body>
 </html>
