@@ -167,11 +167,18 @@ async def ask_jose(req: AskRequest) -> AskResponse:
     if _engine is None:
         raise HTTPException(status_code=503, detail="Personality engine not initialized")
 
-    result = _engine.ask(
-        query=req.query,
-        temperature=req.temperature,
-        session_id=req.session_id,
-    )
+    try:
+        result = _engine.ask(
+            query=req.query,
+            temperature=req.temperature,
+            session_id=req.session_id,
+        )
+    except HTTPException:
+        raise
+    except Exception as exc:  # noqa: BLE001 — surface as 500, never crash
+        import logging as _logging
+        _logging.getLogger(__name__).exception("ask_jose failed")
+        raise HTTPException(status_code=500, detail=f"engine error: {exc}") from exc
 
     return AskResponse(
         response=result["response"],
