@@ -22,6 +22,27 @@ from chromadb.utils import embedding_functions
 from groq import Groq
 
 from src.memory import MemoryStore
+from src.observability import TWIN_RAG_HITS, attribute, record_usage
+
+
+def _record_groq_usage(response, model: str) -> None:
+    """Capture token counts from a Groq chat-completion response.
+
+    No-op when usage is missing (older SDK, streaming partials, etc.) so
+    the observability layer never breaks inference.
+    """
+    usage = getattr(response, "usage", None)
+    if usage is None:
+        return
+    try:
+        record_usage(
+            provider="groq",
+            model=model,
+            prompt_tokens=getattr(usage, "prompt_tokens", 0) or 0,
+            completion_tokens=getattr(usage, "completion_tokens", 0) or 0,
+        )
+    except Exception:  # noqa: BLE001 — never break the request path
+        logger.debug("cost tracking suppressed", exc_info=True)
 
 logger = logging.getLogger(__name__)
 
@@ -346,7 +367,15 @@ class PersonalityEngine:
         candidate_order = {c["text"]: i for i, c in enumerate(candidates)}
         selected.sort(key=lambda x: candidate_order.get(x["text"], 999))
 
-        return selected[:n]
+        final = selected[:n]
+        # Surface RAG-hit breakdown for the dashboard
+        for item in final:
+            try:
+                TWIN_RAG_HITS.inc(source=item.get("source", "unknown"))
+            except Exception:  # noqa: BLE001
+                pass
+
+        return final
 
     # ── Prompt Assembly ────────────────────────────────────────────────────
 
@@ -450,32 +479,35 @@ class PersonalityEngine:
         groq = self._get_groq()
         t = temperature or LLM_TEMPERATURE
         mt = max_tokens or LLM_MAX_TOKENS
-        try:
-            response = groq.chat.completions.create(
-                model=self._model,
-                messages=messages,
-                temperature=t,
-                max_tokens=mt,
-                top_p=0.9,
-            )
-            text = response.choices[0].message.content
-            model_used = self._model
-        except Exception as e:
-            error_str = str(e).lower()
-            # Only fallback on rate limit / availability errors
-            if "429" in error_str or "rate limit" in error_str or "rate_limit" in error_str:
-                logger.warning("Rate limited on %s, falling back to %s", self._model, GROQ_FALLBACK_MODEL)
+        with attribute("twin-chat"):
+            try:
                 response = groq.chat.completions.create(
-                    model=GROQ_FALLBACK_MODEL,
+                    model=self._model,
                     messages=messages,
                     temperature=t,
                     max_tokens=mt,
                     top_p=0.9,
                 )
                 text = response.choices[0].message.content
-                model_used = GROQ_FALLBACK_MODEL
-            else:
-                raise
+                model_used = self._model
+                _record_groq_usage(response, model_used)
+            except Exception as e:
+                error_str = str(e).lower()
+                # Only fallback on rate limit / availability errors
+                if "429" in error_str or "rate limit" in error_str or "rate_limit" in error_str:
+                    logger.warning("Rate limited on %s, falling back to %s", self._model, GROQ_FALLBACK_MODEL)
+                    response = groq.chat.completions.create(
+                        model=GROQ_FALLBACK_MODEL,
+                        messages=messages,
+                        temperature=t,
+                        max_tokens=mt,
+                        top_p=0.9,
+                    )
+                    text = response.choices[0].message.content
+                    model_used = GROQ_FALLBACK_MODEL
+                    _record_groq_usage(response, model_used)
+                else:
+                    raise
 
         # 5. Store conversation in memory
         if session_id and text:

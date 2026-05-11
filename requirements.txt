@@ -15,5 +15,10 @@ sentence-transformers>=3.0.0
 # Voice
 elevenlabs>=1.0.0
 
+# Shared infrastructure with self-improving-agent — cost tracker,
+# reproducibility, Prometheus metrics, distillation pipeline.
+# Pinned to main; bump to a tag when SIA cuts releases.
+self-improving-agent @ git+https://github.com/oh-systems/self-improving-agent.git@main
+
 # ── Dev / Testing (not needed for deployment) ─────────────────────────────────
 pytest>=8.0.0

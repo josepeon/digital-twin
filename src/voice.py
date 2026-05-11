@@ -11,6 +11,7 @@ Handles:
 from __future__ import annotations
 
 import io
+import logging
 import re
 from pathlib import Path
 
@@ -25,6 +26,34 @@ from src.config import (
     VOICE_ID_EN_PATH,
     VOICE_ID_ES_PATH,
 )
+from src.observability import TWIN_VOICE_CHARS, attribute, record_usage
+
+logger = logging.getLogger(__name__)
+
+
+def _record_elevenlabs_usage(text: str, voice_id: str, language: str) -> None:
+    """Record ElevenLabs character count for cost + dashboard metrics.
+
+    ElevenLabs bills per character. We re-use SIA's record_usage with
+    the "elevenlabs" provider (pricing registered in src/observability.py)
+    so the cost dashboard treats characters as the cost unit.
+    """
+    n = len(text or "")
+    if n <= 0:
+        return
+    try:
+        record_usage(
+            provider="elevenlabs",
+            model=voice_id or "unknown",
+            prompt_tokens=0,
+            completion_tokens=n,
+        )
+    except Exception:  # noqa: BLE001
+        logger.debug("elevenlabs cost record suppressed", exc_info=True)
+    try:
+        TWIN_VOICE_CHARS.inc(n, voice=voice_id or "unknown", language=language)
+    except Exception:  # noqa: BLE001
+        pass
 
 # ── Language Detection ─────────────────────────────────────────────────────────
 
@@ -141,19 +170,22 @@ class VoiceEngine:
             use_speaker_boost=True,
         )
 
-        audio_generator = client.text_to_speech.convert(
-            text=text,
-            voice_id=voice_id,
-            model_id=model_id or TTS_MODEL,
-            output_format=output_format or TTS_OUTPUT_FORMAT,
-            voice_settings=voice_settings,
-        )
+        with attribute("twin-voice"):
+            audio_generator = client.text_to_speech.convert(
+                text=text,
+                voice_id=voice_id,
+                model_id=model_id or TTS_MODEL,
+                output_format=output_format or TTS_OUTPUT_FORMAT,
+                voice_settings=voice_settings,
+            )
 
-        # Collect all chunks into bytes
-        audio_buffer = io.BytesIO()
-        for chunk in audio_generator:
-            audio_buffer.write(chunk)
-        return audio_buffer.getvalue()
+            # Collect all chunks into bytes
+            audio_buffer = io.BytesIO()
+            for chunk in audio_generator:
+                audio_buffer.write(chunk)
+
+            _record_elevenlabs_usage(text, voice_id, lang)
+            return audio_buffer.getvalue()
 
     def speak_stream(
         self,
@@ -182,15 +214,18 @@ class VoiceEngine:
             use_speaker_boost=True,
         )
 
-        audio_stream = client.text_to_speech.convert(
-            text=text,
-            voice_id=voice_id,
-            model_id=model_id or TTS_MODEL_REALTIME,
-            output_format=TTS_OUTPUT_FORMAT,
-            voice_settings=voice_settings,
-        )
+        with attribute("twin-voice-stream"):
+            audio_stream = client.text_to_speech.convert(
+                text=text,
+                voice_id=voice_id,
+                model_id=model_id or TTS_MODEL_REALTIME,
+                output_format=TTS_OUTPUT_FORMAT,
+                voice_settings=voice_settings,
+            )
 
-        yield from audio_stream
+            # Record usage up-front — streamed bytes don't change the char count
+            _record_elevenlabs_usage(text, voice_id, lang)
+            yield from audio_stream
 
     # ── Utility ────────────────────────────────────────────────────────────
 
