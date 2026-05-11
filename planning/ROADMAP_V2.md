@@ -295,3 +295,66 @@ When the budget gate opens:
 - **8d Autonomous Agent SEND step** — flip the "draft only" queue to
   actually send, after a few weeks of approval-queue review proves the
   draft quality is high enough.
+
+---
+
+## Implementation status (updated 2026-05-11)
+
+### Shipped ✅
+
+All 12 in-scope items above are landed on `main`. Tests: 44 → 202.
+Pushed to `github.com/josepeon/digital-twin`.
+
+| Sprint | Items | Outcome |
+|---|---|---|
+| 1 — Trust + visibility | T1.1, T1.3 | SIA observability wiring (cost tracker + reproducibility + `/metrics`); GitHub Actions with unit + soft-gated eval-identity |
+| 2 — Tested + streamable | T2.3, T2.1 | runtime coverage on twin_api/voice/memory (~0% → high); `/ask-jose/stream-sse` OpenAI-compat endpoint |
+| 3 — Self-feeding loop | T1.2, T2.2 | `scripts/export_to_sia.py` bridges memory.db → SIA distillation; `scripts/ingest_new_data.py` watches a drop-zone for incremental RAG updates |
+| 4 — Personas + local model | T2.4, T3.1 | default / professional / casual / creative modes; `scripts/train_local.py` runs SIA's MLX fine-tune locally on M-series |
+| 5 — Platform integration | T3.2, T3.3 | WS `/oh/agent` route for the OH Unreal experience; SQLite draft queue with `POST /agent/draft|approve|reject` — no send |
+
+One production bug surfaced + fixed: `/ask-jose` previously let engine
+exceptions propagate raw. Now wrapped in try/except that logs and
+returns 500 with detail.
+
+### Still to do 🔲
+
+#### One-time human actions
+- **Add `GROQ_API_KEY` repo secret** — Settings → Secrets at
+  https://github.com/josepeon/digital-twin/settings/secrets/actions.
+  The CI `eval-identity` job no-ops without it.
+  See `.github/CI_SECRETS.md`.
+- **Run `scripts/train_local.py` end-to-end.** The wrapper exists, the
+  19k-pair Phase 7g export exists, MLX is installed. The training run
+  hasn't happened.
+  ```bash
+  python scripts/train_local.py \
+      --data data/training/jose_train.jsonl \
+      --version v1.0-twin
+  ```
+  ~20 min on M3/M4 Max. Evaluate with
+  `python -m tests.eval_identity --quick`, then promote from CANARY →
+  PRODUCTION in SIA's registry.
+- **Wire a reader to populate the draft queue.** `POST /agent/draft` is
+  built; nothing currently *feeds* it. Gmail API is free — a tiny
+  poller that watches unread + POSTs to `/agent/draft` per message is
+  ~50 LOC.
+- **Plumb T2.2 parser dispatch.** `ingest_new_data.py` calls
+  `parser.parse_file(path)` when present, but the existing
+  `scripts/parse_*.py` parsers expose `main()` instead. Adding a
+  `parse_file(path)` wrapper to each is ~10 LOC per parser; deferred
+  because no new exports are currently queued.
+
+#### Deferred (paid services — waiting on budget gate)
+- **8a Twilio Phone Agent** — $1/mo + $0.013/min. Twin answers Jose's
+  phone in his voice. Skeleton outlined in `DIGITAL_TWIN_PLAN.md` §12.
+- **8e Video Avatar** (HeyGen/Synthesia) — ~$20-30/mo subscription.
+  Lip-synced video of Jose speaking the responses.
+- **8d Autonomous Agent SEND step** — flip the approve handler from
+  informational to dispatching via channel API. Each send risks
+  ElevenLabs charges + platform spam-flag billing.
+
+#### Cross-repo follow-ups
+- Twin's `MemoryStore` (`src/memory.py`) is more battle-tested than
+  SIA's `logging/storage.py`. Candidate for an upstream merge after
+  MAP's `core/interaction_log.py` lands in SIA.
