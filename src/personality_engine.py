@@ -125,6 +125,77 @@ LANGUAGE RULES — STRICT:
 RESPOND AS JOSE WOULD SPEAKING OUT LOUD. Confident, enthusiastic, real. Keep it short, no emojis."""
 
 
+# ── Persona modes (T2.4) ───────────────────────────────────────────────────────
+#
+# Each mode tweaks the base prompt rather than replacing it. Identity stays
+# the same — Jose is Jose — but the *delivery* changes: a pitch in a Slack
+# DM reads differently than a pitch in a board meeting.
+#
+# Mode is selected via the `mode` argument on PersonalityEngine.ask() /
+# ask_stream(), defaulting to "default" which leaves the base prompt
+# untouched. The RAG retriever also consults the mode to filter examples
+# (e.g. don't pull casual IG DMs when in "professional" mode).
+
+PERSONA_ADDENDA: dict[str, str] = {
+    "default": "",
+    "professional": (
+        "\n\nPERSONA MODE — PROFESSIONAL:\n"
+        "You're in a work context — a meeting, a pitch, a board update, a\n"
+        "stakeholder email. Stay confident and direct, but trade slang for\n"
+        "precision. Use full words ('definitely', not 'def'), structure\n"
+        "your points clearly, lead with the headline. Still you, still\n"
+        "short — but the kind of short that closes a deal, not the kind\n"
+        "that's chatting with friends."
+    ),
+    "casual": (
+        "\n\nPERSONA MODE — CASUAL:\n"
+        "You're chilling with friends, replying to a DM, in a group chat.\n"
+        "Lean fully into the relaxed register: 'jaja', 'dale', 'asere'\n"
+        "when Spanish, 'bro' / 'man' when English. Short fragments. Often\n"
+        "no period at the end. You can be incomplete — real people don't\n"
+        "wrap up every thought."
+    ),
+    "creative": (
+        "\n\nPERSONA MODE — CREATIVE:\n"
+        "You're in studio mode, riffing on a fashion piece, an Unreal\n"
+        "scene, a Nooon collection direction. Think out loud. Free-\n"
+        "associate. Make connections between disciplines — fashion ↔ code\n"
+        "↔ spatial design. It's OK to be a little abstract, hint at\n"
+        "things, leave space for the listener to fill in. Enthusiasm\n"
+        "dialled up."
+    ),
+}
+
+
+PERSONA_REGISTER_FILTER: dict[str, str | None] = {
+    # When the persona mode is set, prefer RAG examples from this register.
+    # None means "no filter — let the live detect_register decide."
+    "default": None,
+    "professional": "professional",
+    "casual": "casual",
+    "creative": None,  # creative pulls from both casual and professional
+}
+
+
+def system_prompt_for(mode: str = "default") -> str:
+    """Compose the system prompt for a given persona mode.
+
+    Always extends the base ``JOSE_SYSTEM_PROMPT`` — identity is identity;
+    only the delivery shifts. Unknown modes fall back to "default" with
+    a warning logged once.
+    """
+    addendum = PERSONA_ADDENDA.get(mode)
+    if addendum is None:
+        # Unknown mode — log and fall back. Don't raise; the API surface
+        # is user-controlled and we'd rather be lenient than 500.
+        logger.warning("Unknown persona mode %r — falling back to 'default'", mode)
+        addendum = ""
+    return JOSE_SYSTEM_PROMPT + addendum
+
+
+VALID_PERSONAS: tuple[str, ...] = tuple(PERSONA_ADDENDA.keys())
+
+
 # ── Language & Register Detection ──────────────────────────────────────────────
 
 SPANISH_SIGNALS = {
@@ -385,10 +456,15 @@ class PersonalityEngine:
         examples: list[dict] | None = None,
         context: dict[str, str] | None = None,
         session_id: str | None = None,
+        mode: str = "default",
     ) -> list[dict[str, str]]:
-        """Assemble the full prompt with system + identity + few-shot + history + query."""
+        """Assemble the full prompt with system + identity + few-shot + history + query.
+
+        ``mode`` selects a persona variant — see PERSONA_ADDENDA. Identity
+        is the same across modes; only the delivery shifts.
+        """
         ctx = context or detect_context(query)
-        system = JOSE_SYSTEM_PROMPT
+        system = system_prompt_for(mode)
 
         # Add identity facts grouped by category
         facts = self._load_identity_facts()
@@ -452,6 +528,7 @@ class PersonalityEngine:
         temperature: float | None = None,
         max_tokens: int | None = None,
         session_id: str | None = None,
+        mode: str = "default",
     ) -> dict[str, Any]:
         """Ask the digital twin a question.
 
@@ -461,19 +538,24 @@ class PersonalityEngine:
             max_tokens: Max tokens override.
             session_id: Optional session ID for conversation memory.
                         If provided, maintains multi-turn context.
+            mode: Persona variant — "default" | "professional" | "casual"
+                  | "creative". See PERSONA_ADDENDA in this module.
         """
         # 1. Detect context
         ctx = detect_context(query)
 
-        # 2. Retrieve similar real Jose messages — use MORE examples for better style
+        # 2. Retrieve similar real Jose messages — persona mode can pin
+        #    the retrieval register; falls back to detected register if
+        #    the mode doesn't have a preference.
+        register_filter = PERSONA_REGISTER_FILTER.get(mode) or ctx["register"]
         examples = self.retrieve(
             query,
-            register=ctx["register"],
+            register=register_filter,
             language=ctx["language"],
         )
 
         # 3. Build prompt (with conversation history if session_id provided)
-        messages = self.build_prompt(query, examples, ctx, session_id=session_id)
+        messages = self.build_prompt(query, examples, ctx, session_id=session_id, mode=mode)
 
         # 4. Generate with Groq
         groq = self._get_groq()
@@ -536,27 +618,25 @@ class PersonalityEngine:
         temperature: float | None = None,
         max_tokens: int | None = None,
         session_id: str | None = None,
+        mode: str = "default",
     ):
         """Stream the twin's response token by token.
 
+        Args:
+            mode: Persona variant — same options as ask(): "default",
+                  "professional", "casual", "creative".
+
         Yields:
             str — text deltas as Groq emits them.
-
-        Used by the SSE endpoint (T2.1). Reuses the same prompt
-        assembly + context detection as ``ask()``, then flips on the
-        Groq SDK's ``stream=True`` flag to surface partials.
-
-        Persists the final response to session memory only after the
-        stream completes successfully — interrupted streams don't
-        write half a turn to history.
         """
         ctx = detect_context(query)
+        register_filter = PERSONA_REGISTER_FILTER.get(mode) or ctx["register"]
         examples = self.retrieve(
             query,
-            register=ctx["register"],
+            register=register_filter,
             language=ctx["language"],
         )
-        messages = self.build_prompt(query, examples, ctx, session_id=session_id)
+        messages = self.build_prompt(query, examples, ctx, session_id=session_id, mode=mode)
 
         groq = self._get_groq()
         t = temperature or LLM_TEMPERATURE
