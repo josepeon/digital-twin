@@ -529,3 +529,59 @@ class PersonalityEngine:
         """Simplified ask — returns just the text response."""
         result = self.ask(query, session_id=session_id)
         return result["response"]
+
+    def ask_stream(
+        self,
+        query: str,
+        temperature: float | None = None,
+        max_tokens: int | None = None,
+        session_id: str | None = None,
+    ):
+        """Stream the twin's response token by token.
+
+        Yields:
+            str — text deltas as Groq emits them.
+
+        Used by the SSE endpoint (T2.1). Reuses the same prompt
+        assembly + context detection as ``ask()``, then flips on the
+        Groq SDK's ``stream=True`` flag to surface partials.
+
+        Persists the final response to session memory only after the
+        stream completes successfully — interrupted streams don't
+        write half a turn to history.
+        """
+        ctx = detect_context(query)
+        examples = self.retrieve(
+            query,
+            register=ctx["register"],
+            language=ctx["language"],
+        )
+        messages = self.build_prompt(query, examples, ctx, session_id=session_id)
+
+        groq = self._get_groq()
+        t = temperature or LLM_TEMPERATURE
+        mt = max_tokens or LLM_MAX_TOKENS
+
+        chunks: list[str] = []
+        with attribute("twin-chat-stream"):
+            stream = groq.chat.completions.create(
+                model=self._model,
+                messages=messages,
+                temperature=t,
+                max_tokens=mt,
+                top_p=0.9,
+                stream=True,
+            )
+            for chunk in stream:
+                try:
+                    delta = chunk.choices[0].delta.content
+                except (AttributeError, IndexError):
+                    delta = None
+                if delta:
+                    chunks.append(delta)
+                    yield delta
+
+        text = "".join(chunks)
+        if session_id and text:
+            add_message(session_id, "user", query)
+            add_message(session_id, "assistant", text)

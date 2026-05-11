@@ -182,6 +182,51 @@ class TestAskJoseVoice:
         assert response.content == b"fake-mp3-bytes"
 
 
+class TestAskJoseStreamSSE:
+    def test_sse_emits_data_frames_and_done(self, client):
+        # Make ask_stream yield three deltas
+        client._fake_engine.ask_stream.return_value = iter(  # type: ignore
+            ["Hello", ", ", "world!"]
+        )
+        response = client.post(
+            "/ask-jose/stream-sse",
+            json={"query": "hi"},
+        )
+        assert response.status_code == 200
+        assert response.headers["content-type"].startswith("text/event-stream")
+
+        body = response.text
+        frames = [
+            line[len("data: "):]
+            for line in body.split("\n\n")
+            if line.startswith("data: ")
+        ]
+        assert frames, "no SSE frames emitted"
+        # OpenAI-style terminator
+        assert frames[-1].strip() == "[DONE]"
+
+        # Each non-DONE frame is JSON; at least one carries a delta
+        import json as _json
+
+        deltas = [
+            _json.loads(f).get("delta")
+            for f in frames[:-1]
+            if f.strip() != "[DONE]"
+        ]
+        assert "Hello" in deltas
+
+    def test_sse_surfaces_engine_error_as_frame(self, client):
+        client._fake_engine.ask_stream.side_effect = RuntimeError("boom")  # type: ignore
+        response = client.post(
+            "/ask-jose/stream-sse",
+            json={"query": "hi"},
+        )
+        assert response.status_code == 200
+        assert "error" in response.text
+        assert "boom" in response.text
+        assert "[DONE]" in response.text
+
+
 # ---------------------------------------------------------------------
 # /transcribe
 # ---------------------------------------------------------------------

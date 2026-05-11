@@ -256,6 +256,48 @@ async def ask_jose_stream(req: AskRequest) -> StreamingResponse:
     )
 
 
+@app.post("/ask-jose/stream-sse", dependencies=[Depends(verify_api_key)])
+async def ask_jose_stream_sse(req: AskRequest) -> StreamingResponse:
+    """Ask Jose a question — streams the text response as Server-Sent Events.
+
+    Wire format mirrors what OpenAI / SIA emit:
+        data: {"delta": "Hello"}\n\n
+        data: {"delta": " there"}\n\n
+        data: {"done": true}\n\n
+        data: [DONE]\n\n
+
+    REST clients (mobile, CLI, third-party services) that can't use the
+    /ws WebSocket get the same streaming UX with a plain POST.
+    """
+    if _engine is None:
+        raise HTTPException(status_code=503, detail="Personality engine not initialized")
+
+    import json as _json
+
+    def event_stream():
+        try:
+            for delta in _engine.ask_stream(
+                query=req.query,
+                temperature=req.temperature,
+                session_id=req.session_id,
+            ):
+                yield f"data: {_json.dumps({'delta': delta})}\n\n"
+        except Exception as exc:  # noqa: BLE001 — surface as error frame, not crash
+            yield f"data: {_json.dumps({'error': str(exc)})}\n\n"
+        yield f"data: {_json.dumps({'done': True})}\n\n"
+        yield "data: [DONE]\n\n"
+
+    return StreamingResponse(
+        event_stream(),
+        media_type="text/event-stream",
+        headers={
+            "Cache-Control": "no-cache",
+            "Connection": "keep-alive",
+            "X-Accel-Buffering": "no",  # nginx: don't buffer
+        },
+    )
+
+
 # ── Speech-to-Text ─────────────────────────────────────────────────────────────
 
 
