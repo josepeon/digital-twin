@@ -470,6 +470,47 @@ async def _handle_ws_query(ws: WebSocket, msg: dict) -> None:
             await ws.send_json({"type": "error", "content": f"TTS failed: {e}"})
 
 
+# ── OH Platform Integration (T3.2) ─────────────────────────────────────────────
+
+
+@app.websocket("/oh/agent")
+async def oh_agent_endpoint(ws: WebSocket):
+    """WebSocket endpoint for the OH spatial-commerce platform.
+
+    Same engine as /ws but with a slimmer wire protocol matched to OH's
+    agent SDK, and persona pinned to 'professional' by default for the
+    commerce context. See src/oh_agent.py for the full protocol spec.
+    """
+    from src import oh_agent
+
+    await ws.accept()
+    if _engine is None:
+        await ws.send_text(oh_agent.encode_error("Engine not initialized"))
+        await ws.close()
+        return
+
+    try:
+        while True:
+            raw = await ws.receive_text()
+            try:
+                parsed = oh_agent.parse_incoming(raw)
+            except ValueError as exc:
+                await ws.send_text(oh_agent.encode_error(str(exc)))
+                continue
+
+            if parsed["type"] == "presence":
+                await ws.send_text(
+                    oh_agent.encode_presence_ack(parsed.get("session_id"))
+                )
+                continue
+
+            # Streaming query — relay deltas + done frame
+            async for frame in oh_agent.stream_response(_engine, parsed):
+                await ws.send_text(frame)
+    except WebSocketDisconnect:
+        return
+
+
 # ── Web UI ─────────────────────────────────────────────────────────────────────
 
 @app.get("/", include_in_schema=False)
