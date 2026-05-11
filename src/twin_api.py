@@ -470,6 +470,104 @@ async def _handle_ws_query(ws: WebSocket, msg: dict) -> None:
             await ws.send_json({"type": "error", "content": f"TTS failed: {e}"})
 
 
+# ── Draft Queue (T3.3) ─────────────────────────────────────────────────────────
+
+
+class DraftRequest(BaseModel):
+    channel: str = Field(..., description="email | instagram | whatsapp | slack | test")
+    original: str = Field(..., min_length=1, description="The incoming message we're replying to")
+    sender: str | None = Field(None, description="Optional sender identifier for context")
+
+
+class DraftRecord(BaseModel):
+    id: str
+    channel: str
+    sender: str | None = None
+    original: str
+    draft: str
+    status: str
+    created_at: float
+    reviewed_at: float | None = None
+
+
+# Lazy: created on first request so tests can monkey-patch the path
+_drafts: Any | None = None
+
+
+def _draft_queue():
+    """Return the process-wide DraftQueue, initializing on first use."""
+    global _drafts
+    if _drafts is None:
+        from src.agent import DraftQueue
+        _drafts = DraftQueue()
+    return _drafts
+
+
+@app.post("/agent/draft", response_model=DraftRecord,
+          dependencies=[Depends(verify_api_key)])
+async def create_draft(req: DraftRequest) -> DraftRecord:
+    """Generate a Jose-voice reply and enqueue it for review.
+
+    Does NOT send. Approval just marks the draft ready for Jose to
+    copy + paste — the actual send path is deferred (T3.3 docs).
+    """
+    if _engine is None:
+        raise HTTPException(status_code=503, detail="Engine not initialized")
+
+    from src.agent import draft_reply
+
+    try:
+        draft_text = draft_reply(_engine, req.channel, req.original, req.sender)
+    except Exception as exc:  # noqa: BLE001
+        raise HTTPException(status_code=500, detail=f"draft generation failed: {exc}") from exc
+
+    if not draft_text.strip():
+        raise HTTPException(status_code=502, detail="empty draft returned from engine")
+
+    queue = _draft_queue()
+    try:
+        draft_id = queue.enqueue(
+            channel=req.channel,
+            sender=req.sender,
+            original=req.original,
+            draft=draft_text,
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+    return DraftRecord(**queue.get(draft_id))
+
+
+@app.get("/agent/queue", dependencies=[Depends(verify_api_key)])
+async def list_pending_drafts() -> dict:
+    """Pending drafts, newest first."""
+    queue = _draft_queue()
+    return {
+        "drafts": queue.list_pending(),
+        "stats": queue.stats(),
+    }
+
+
+@app.post("/agent/approve/{draft_id}", dependencies=[Depends(verify_api_key)])
+async def approve_draft(draft_id: str) -> dict:
+    """Mark a draft approved. Does NOT send; approval is informational
+    until the no-paid budget gate opens."""
+    queue = _draft_queue()
+    updated = queue.approve(draft_id)
+    if not updated:
+        raise HTTPException(status_code=404, detail="draft not found")
+    return queue.get(draft_id)
+
+
+@app.post("/agent/reject/{draft_id}", dependencies=[Depends(verify_api_key)])
+async def reject_draft(draft_id: str) -> dict:
+    queue = _draft_queue()
+    updated = queue.reject(draft_id)
+    if not updated:
+        raise HTTPException(status_code=404, detail="draft not found")
+    return queue.get(draft_id)
+
+
 # ── OH Platform Integration (T3.2) ─────────────────────────────────────────────
 
 
