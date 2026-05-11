@@ -109,6 +109,13 @@ class AskRequest(BaseModel):
     language: str | None = Field(None, description="Force language: 'en' or 'es'")
     temperature: float | None = Field(None, ge=0.0, le=2.0, description="LLM temperature")
     session_id: str | None = Field(None, description="Session ID for conversation memory. Omit for stateless.")
+    mode: str | None = Field(
+        None,
+        description=(
+            "Persona mode: 'default' (auto-detect), 'professional', 'casual', or 'creative'. "
+            "Affects delivery only — identity is the same in every mode."
+        ),
+    )
 
 
 class AskResponse(BaseModel):
@@ -172,6 +179,7 @@ async def ask_jose(req: AskRequest) -> AskResponse:
             query=req.query,
             temperature=req.temperature,
             session_id=req.session_id,
+            mode=req.mode or "default",
         )
     except HTTPException:
         raise
@@ -202,6 +210,7 @@ async def ask_jose_voice(req: AskRequest) -> Response:
         query=req.query,
         temperature=req.temperature,
         session_id=req.session_id,
+        mode=req.mode or "default",
     )
 
     # Convert to speech
@@ -237,6 +246,7 @@ async def ask_jose_stream(req: AskRequest) -> StreamingResponse:
         query=req.query,
         temperature=req.temperature,
         session_id=req.session_id,
+        mode=req.mode or "default",
     )
 
     # Stream audio
@@ -280,6 +290,7 @@ async def ask_jose_stream_sse(req: AskRequest) -> StreamingResponse:
                 query=req.query,
                 temperature=req.temperature,
                 session_id=req.session_id,
+                mode=req.mode or "default",
             ):
                 yield f"data: {_json.dumps({'delta': delta})}\n\n"
         except Exception as exc:  # noqa: BLE001 — surface as error frame, not crash
