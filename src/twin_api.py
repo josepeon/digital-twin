@@ -28,6 +28,11 @@ from pydantic import BaseModel, Field
 
 from src.config import TWIN_API_KEY
 from src.memory import MemoryStore
+from src.observability import (
+    attribute as _attribute,
+    record_usage as _record_usage,
+    registry as _metrics_registry,
+)
 from src.personality_engine import PersonalityEngine, clear_session, _memory
 from src.voice import VoiceEngine
 
@@ -139,6 +144,20 @@ async def health_check() -> HealthResponse:
         rag_index_loaded=rag_loaded,
         voice_clones_loaded=voice_loaded,
         groq_model=GROQ_MODEL,
+    )
+
+
+@app.get("/metrics", include_in_schema=False)
+async def metrics_endpoint() -> Response:
+    """Prometheus-format metrics. Scrape with any Prometheus server.
+
+    Exposes Groq + ElevenLabs token/character counts, RAG hit breakdown,
+    request durations, and active session count — same shape SIA and
+    multi_agent_planner emit for unified OH AI observability.
+    """
+    return Response(
+        content=_metrics_registry().render(),
+        media_type="text/plain; version=0.0.4; charset=utf-8",
     )
 
 
@@ -256,15 +275,27 @@ async def transcribe_audio(audio: UploadFile = File(...)):
 
     try:
         filename = audio.filename or "recording.webm"
-        result = await loop.run_in_executor(
-            None,
-            lambda: groq.audio.transcriptions.create(
-                file=(filename, audio_bytes),
-                model="whisper-large-v3",
-                response_format="json",
-            ),
-        )
+        with _attribute("twin-stt"):
+            result = await loop.run_in_executor(
+                None,
+                lambda: groq.audio.transcriptions.create(
+                    file=(filename, audio_bytes),
+                    model="whisper-large-v3",
+                    response_format="json",
+                ),
+            )
         text = result.text.strip() if result.text else ""
+        # Whisper is free on Groq, but track call counts so the dashboard
+        # sees STT volume. Token count is approximated by output chars.
+        try:
+            _record_usage(
+                provider="groq-whisper",
+                model="whisper-large-v3",
+                prompt_tokens=0,
+                completion_tokens=len(text),
+            )
+        except Exception:  # noqa: BLE001
+            pass
         return {"text": text, "language": "auto"}
     except Exception as e:
         raise HTTPException(status_code=502, detail=f"Transcription failed: {e}")
