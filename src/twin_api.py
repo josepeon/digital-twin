@@ -196,6 +196,7 @@ async def ask_jose(req: AskRequest) -> AskResponse:
             temperature=req.temperature,
             session_id=req.session_id,
             mode=req.mode or "default",
+            language=req.language,
         )
     except HTTPException:
         raise
@@ -229,6 +230,7 @@ async def ask_jose_voice(req: AskRequest) -> Response:
             temperature=req.temperature,
             session_id=req.session_id,
             mode=req.mode or "default",
+            language=req.language,
         )
     except Exception as exc:  # noqa: BLE001 — surface as 500, never crash
         import logging as _logging
@@ -272,6 +274,7 @@ async def ask_jose_stream(req: AskRequest) -> StreamingResponse:
             temperature=req.temperature,
             session_id=req.session_id,
             mode=req.mode or "default",
+            language=req.language,
         )
     except Exception as exc:  # noqa: BLE001 — surface as 500, never crash
         import logging as _logging
@@ -320,6 +323,7 @@ async def ask_jose_stream_sse(req: AskRequest) -> StreamingResponse:
                 temperature=req.temperature,
                 session_id=req.session_id,
                 mode=req.mode or "default",
+                language=req.language,
             ):
                 yield f"data: {_json.dumps({'delta': delta})}\n\n"
         except Exception as exc:  # noqa: BLE001 — surface as error frame, not crash

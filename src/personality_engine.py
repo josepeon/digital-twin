@@ -529,6 +529,7 @@ class PersonalityEngine:
         max_tokens: int | None = None,
         session_id: str | None = None,
         mode: str = "default",
+        language: str | None = None,
     ) -> dict[str, Any]:
         """Ask the digital twin a question.
 
@@ -540,9 +541,12 @@ class PersonalityEngine:
                         If provided, maintains multi-turn context.
             mode: Persona variant — "default" | "professional" | "casual"
                   | "creative". See PERSONA_ADDENDA in this module.
+            language: Force "en" or "es" — overrides auto-detection.
         """
-        # 1. Detect context
+        # 1. Detect context (explicit language wins over detection)
         ctx = detect_context(query)
+        if language in ("en", "es"):
+            ctx["language"] = language
 
         # 2. Retrieve similar real Jose messages — persona mode can pin
         #    the retrieval register; falls back to detected register if
@@ -619,17 +623,21 @@ class PersonalityEngine:
         max_tokens: int | None = None,
         session_id: str | None = None,
         mode: str = "default",
+        language: str | None = None,
     ):
         """Stream the twin's response token by token.
 
         Args:
             mode: Persona variant — same options as ask(): "default",
                   "professional", "casual", "creative".
+            language: Force "en" or "es" — overrides auto-detection.
 
         Yields:
             str — text deltas as Groq emits them.
         """
         ctx = detect_context(query)
+        if language in ("en", "es"):
+            ctx["language"] = language
         register_filter = PERSONA_REGISTER_FILTER.get(mode) or ctx["register"]
         examples = self.retrieve(
             query,

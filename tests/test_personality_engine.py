@@ -88,3 +88,39 @@ class TestPersonalityEngine:
         assert "Cuba" in JOSE_SYSTEM_PROMPT
         assert "English" in JOSE_SYSTEM_PROMPT
         assert "Spanish" in JOSE_SYSTEM_PROMPT
+
+
+class TestLanguageOverride:
+    """The `language` param on ask()/ask_stream() must beat auto-detection."""
+
+    def _engine_with_mocked_groq(self):
+        from unittest.mock import MagicMock
+
+        engine = PersonalityEngine(groq_api_key="test-key")
+        engine.retrieve = MagicMock(return_value=[])
+        mock_groq = MagicMock()
+        completion = MagicMock()
+        completion.choices = [MagicMock()]
+        completion.choices[0].message.content = "ok"
+        completion.usage = None
+        mock_groq.chat.completions.create.return_value = completion
+        engine._groq = mock_groq
+        return engine, mock_groq
+
+    def test_forced_spanish_overrides_english_detection(self):
+        engine, mock_groq = self._engine_with_mocked_groq()
+        engine.ask("Tell me about your work", language="es")
+        system = mock_groq.chat.completions.create.call_args.kwargs["messages"][0]["content"]
+        assert "Respond ENTIRELY in Spanish" in system
+
+    def test_forced_english_overrides_spanish_detection(self):
+        engine, mock_groq = self._engine_with_mocked_groq()
+        engine.ask("Oye asere, qué bolá con el proyecto", language="en")
+        system = mock_groq.chat.completions.create.call_args.kwargs["messages"][0]["content"]
+        assert "Respond ENTIRELY in English" in system
+
+    def test_invalid_language_falls_back_to_detection(self):
+        engine, mock_groq = self._engine_with_mocked_groq()
+        engine.ask("Tell me about your work", language="fr")
+        system = mock_groq.chat.completions.create.call_args.kwargs["messages"][0]["content"]
+        assert "Respond ENTIRELY in English" in system
