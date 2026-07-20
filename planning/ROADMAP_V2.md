@@ -317,6 +317,28 @@ One production bug surfaced + fixed: `/ask-jose` previously let engine
 exceptions propagate raw. Now wrapped in try/except that logs and
 returns 500 with detail.
 
+### Hardening pass (2026-07-20) ✅
+
+A review sweep landed eight fixes on the runtime path (tests 202 → 210):
+
+- REST endpoints no longer block the event loop (asyncio.to_thread);
+  voice/stream endpoints got the same 500-wrapping as /ask-jose
+- `temperature=0.0` honored; ask_stream got the 429 fallback model
+- X-Response-Text header sanitized (emoji crashed header encoding)
+- constant-time API-key compare; CORS credentials disabled (invalid
+  with wildcard origins)
+- MemoryStore/DraftQueue serialized behind an RLock; history ordering
+  keyed on id instead of timestamp; drafts DB path CWD-independent
+- WS follow-up loop sends error frames instead of silently dropping
+- `language` request field wired through (was silently ignored) with
+  an explicit OVERRIDE instruction so it beats language-matching
+- `parse_file()` dispatch on all five parsers (T2.2 plumbing, above)
+
+Also landed: `scripts/eval_adapter.py` + v1.0-twin canary eval results
+(0.8 quick) from the local MLX fine-tune run — the "run
+train_local.py" one-time action above is DONE; promotion to
+production in SIA's registry is still pending eval review.
+
 ### Still to do 🔲
 
 #### One-time human actions
@@ -339,11 +361,9 @@ returns 500 with detail.
   built; nothing currently *feeds* it. Gmail API is free — a tiny
   poller that watches unread + POSTs to `/agent/draft` per message is
   ~50 LOC.
-- **Plumb T2.2 parser dispatch.** `ingest_new_data.py` calls
-  `parser.parse_file(path)` when present, but the existing
-  `scripts/parse_*.py` parsers expose `main()` instead. Adding a
-  `parse_file(path)` wrapper to each is ~10 LOC per parser; deferred
-  because no new exports are currently queued.
+- ~~**Plumb T2.2 parser dispatch.**~~ ✅ Done 2026-07-20 — all five
+  parsers now expose `parse_file(path)`; email reads addresses from
+  the `JOSE_EMAILS` env var.
 
 #### Deferred (paid services — waiting on budget gate)
 - **8a Twilio Phone Agent** — $1/mo + $0.013/min. Twin answers Jose's
