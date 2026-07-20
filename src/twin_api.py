@@ -15,6 +15,7 @@ from __future__ import annotations
 import asyncio
 import json
 import os
+import secrets
 import uuid
 from contextlib import asynccontextmanager
 from pathlib import Path
@@ -74,10 +75,24 @@ app = FastAPI(
 app.add_middleware(
     CORSMiddleware,
     allow_origins=["*"],  # Narrow this in production
-    allow_credentials=True,
+    # Wildcard origins + credentials is an invalid CORS combo — browsers
+    # reject it. Auth uses the Authorization header, not cookies, so
+    # credentials are not needed.
+    allow_credentials=False,
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
+
+def _header_safe(text: str, limit: int = 200) -> str:
+    """Make response text safe for an HTTP header (latin-1, single line)."""
+    return (
+        text[:limit]
+        .replace("\r", " ")
+        .replace("\n", " ")
+        .encode("latin-1", "replace")
+        .decode("latin-1")
+    )
 
 # Static files for web UI
 _static_dir = Path(__file__).parent / "static"
@@ -98,7 +113,7 @@ async def verify_api_key(request: Request) -> None:
     else:
         token = request.headers.get("X-API-Key", "")
 
-    if token != TWIN_API_KEY:
+    if not secrets.compare_digest(token, TWIN_API_KEY):
         raise HTTPException(status_code=401, detail="Invalid API key")
 
 
@@ -234,7 +249,7 @@ async def ask_jose_voice(req: AskRequest) -> Response:
         content=audio_bytes,
         media_type="audio/mpeg",
         headers={
-            "X-Response-Text": result["response"][:200],
+            "X-Response-Text": _header_safe(result["response"]),
             "X-Response-Language": result["language"],
             "X-Response-Register": result["register"],
         },
@@ -274,7 +289,7 @@ async def ask_jose_stream(req: AskRequest) -> StreamingResponse:
         audio_stream(),
         media_type="audio/mpeg",
         headers={
-            "X-Response-Text": result["response"][:200],
+            "X-Response-Text": _header_safe(result["response"]),
             "X-Response-Language": result["language"],
         },
     )
