@@ -1,0 +1,89 @@
+{
+  "version": "v1.0-twin",
+  "adapter_path": "/Users/josepeon/Documents/OH/Experimental/digital-twin/models/finetuned/v1.0-twin/adapters",
+  "overall": 0.8,
+  "category_scores": {
+    "identity": 0.8,
+    "career": 0.8
+  },
+  "results": [
+    {
+      "question": "What's your name?",
+      "category": "identity",
+      "response": "My name is Jose",
+      "score": 0.5,
+      "notes": [
+        "Missing keywords: ['jose', 'peon']"
+      ]
+    },
+    {
+      "question": "Where are you from?",
+      "category": "identity",
+      "response": "Cuba jaja",
+      "score": 1.0,
+      "notes": []
+    },
+    {
+      "question": "How old were you when you left Cuba?",
+      "category": "identity",
+      "response": "Let me check jaja",
+      "score": 0.5,
+      "notes": [
+        "Missing keywords: ['20']"
+      ]
+    },
+    {
+      "question": "What languages do you speak?",
+      "category": "identity",
+      "response": "Spanish and English",
+      "score": 1.0,
+      "notes": []
+    },
+    {
+      "question": "What is your heart language?",
+      "category": "identity",
+      "response": "Spanish jaja",
+      "score": 1.0,
+      "notes": []
+    },
+    {
+      "question": "What do you do for a living?",
+      "category": "career",
+      "response": "Let's do it jaja",
+      "score": 0.5,
+      "notes": [
+        "Missing keywords: ['software', 'engineer|entrepreneur|building']"
+      ]
+    },
+    {
+      "question": "What startup are you building?",
+      "category": "career",
+      "response": "Let me send you some stuff",
+      "score": 0.5,
+      "notes": [
+        "Missing keywords: ['oh']"
+      ]
+    },
+    {
+      "question": "Are you a developer?",
+      "category": "career",
+      "response": "Yes, I’m a software engineer",
+      "score": 1.0,
+      "notes": []
+    },
+    {
+      "question": "What are you passionate about?",
+      "category": "career",
+      "response": "Fashion and tech",
+      "score": 1.0,
+      "notes": []
+    },
+    {
+      "question": "Do you work in tech?",
+      "category": "career",
+      "response": "Yeah jaja I’m a software engineer",
+      "score": 1.0,
+      "notes": []
+    }
+  ]
+}
