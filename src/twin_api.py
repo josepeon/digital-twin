@@ -364,13 +364,11 @@ async def transcribe_audio(audio: UploadFile = File(...)):
 
     # Transcribe with Groq Whisper
     groq = _engine._get_groq()
-    loop = asyncio.get_event_loop()
 
     try:
         filename = audio.filename or "recording.webm"
         with _attribute("twin-stt"):
-            result = await loop.run_in_executor(
-                None,
+            result = await asyncio.to_thread(
                 lambda: groq.audio.transcriptions.create(
                     file=(filename, audio_bytes),
                     model="whisper-large-v3",
@@ -441,16 +439,24 @@ async def websocket_endpoint(ws: WebSocket):
             pass
         return
 
-    # Keep connection alive for follow-up queries
-    try:
-        while True:
+    # Keep connection alive for follow-up queries. A bad message or an
+    # engine error should produce an error frame, not silently kill the
+    # connection — only a disconnect ends the loop.
+    while True:
+        try:
             raw = await ws.receive_text()
+        except WebSocketDisconnect:
+            return
+        try:
             msg = json.loads(raw)
             await _handle_ws_query(ws, msg)
-    except WebSocketDisconnect:
-        pass
-    except Exception:
-        pass
+        except WebSocketDisconnect:
+            return
+        except Exception as e:  # noqa: BLE001
+            try:
+                await ws.send_json({"type": "error", "content": str(e)})
+            except Exception:  # noqa: BLE001 — socket already gone
+                return
 
 
 async def _handle_ws_query(ws: WebSocket, msg: dict) -> None:
@@ -468,10 +474,8 @@ async def _handle_ws_query(ws: WebSocket, msg: dict) -> None:
     want_voice = msg.get("voice", False)
 
     # Generate text response (runs in thread pool to not block event loop)
-    loop = asyncio.get_event_loop()
-    result = await loop.run_in_executor(
-        None,
-        lambda: _engine.ask(query=query, session_id=session_id),
+    result = await asyncio.to_thread(
+        _engine.ask, query=query, session_id=session_id
     )
 
     text = result["response"]
@@ -490,9 +494,8 @@ async def _handle_ws_query(ws: WebSocket, msg: dict) -> None:
     if want_voice and _voice and text:
         try:
             import base64
-            audio_bytes = await loop.run_in_executor(
-                None,
-                lambda: _voice.speak(text=text, language=lang),
+            audio_bytes = await asyncio.to_thread(
+                _voice.speak, text=text, language=lang
             )
             audio_b64 = base64.b64encode(audio_bytes).decode("utf-8")
             await ws.send_json({
