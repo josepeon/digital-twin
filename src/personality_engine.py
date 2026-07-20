@@ -485,11 +485,29 @@ class PersonalityEngine:
                         facts_block += f"\n  {q} → {a}"
             system += facts_block
 
-        # Add language/register instruction — strict single-language
+        # Add language/register instruction — strict single-language.
+        # A forced language must explicitly override the base prompt's
+        # "match the speaker's language" rule, or the model follows that
+        # rule instead when the query is in the other language.
+        forced = ctx.get("language_forced", False)
         if ctx["language"] == "es":
-            system += "\n\n→ Respond ENTIRELY in Spanish. Cuban warmth, natural expressions. Do NOT include any English words."
+            if forced:
+                system += (
+                    "\n\n→ OVERRIDE: The user explicitly requested SPANISH. This overrides the "
+                    "language-matching rules above — even though the message is in English, "
+                    "respond ENTIRELY in Spanish. Cuban warmth, natural expressions. No English words."
+                )
+            else:
+                system += "\n\n→ Respond ENTIRELY in Spanish. Cuban warmth, natural expressions. Do NOT include any English words."
         else:
-            system += "\n\n→ Respond ENTIRELY in English. Do NOT include any Spanish words."
+            if forced:
+                system += (
+                    "\n\n→ OVERRIDE: The user explicitly requested ENGLISH. This overrides the "
+                    "language-matching rules above — even though the message is in Spanish, "
+                    "respond ENTIRELY in English. No Spanish words."
+                )
+            else:
+                system += "\n\n→ Respond ENTIRELY in English. Do NOT include any Spanish words."
         if ctx["register"] == "family":
             system += " Family mode — extra warm, affectionate."
         elif ctx["register"] == "casual":
@@ -547,6 +565,7 @@ class PersonalityEngine:
         ctx = detect_context(query)
         if language in ("en", "es"):
             ctx["language"] = language
+            ctx["language_forced"] = True
 
         # 2. Retrieve similar real Jose messages — persona mode can pin
         #    the retrieval register; falls back to detected register if
@@ -638,6 +657,7 @@ class PersonalityEngine:
         ctx = detect_context(query)
         if language in ("en", "es"):
             ctx["language"] = language
+            ctx["language_forced"] = True
         register_filter = PERSONA_REGISTER_FILTER.get(mode) or ctx["register"]
         examples = self.retrieve(
             query,

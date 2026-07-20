@@ -111,13 +111,15 @@ class TestLanguageOverride:
         engine, mock_groq = self._engine_with_mocked_groq()
         engine.ask("Tell me about your work", language="es")
         system = mock_groq.chat.completions.create.call_args.kwargs["messages"][0]["content"]
-        assert "Respond ENTIRELY in Spanish" in system
+        assert "ENTIRELY in Spanish" in system
+        assert "OVERRIDE" in system
 
     def test_forced_english_overrides_spanish_detection(self):
         engine, mock_groq = self._engine_with_mocked_groq()
         engine.ask("Oye asere, qué bolá con el proyecto", language="en")
         system = mock_groq.chat.completions.create.call_args.kwargs["messages"][0]["content"]
-        assert "Respond ENTIRELY in English" in system
+        assert "ENTIRELY in English" in system
+        assert "OVERRIDE" in system
 
     def test_invalid_language_falls_back_to_detection(self):
         engine, mock_groq = self._engine_with_mocked_groq()
