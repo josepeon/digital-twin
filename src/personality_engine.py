@@ -559,8 +559,8 @@ class PersonalityEngine:
 
         # 4. Generate with Groq
         groq = self._get_groq()
-        t = temperature or LLM_TEMPERATURE
-        mt = max_tokens or LLM_MAX_TOKENS
+        t = temperature if temperature is not None else LLM_TEMPERATURE
+        mt = max_tokens if max_tokens is not None else LLM_MAX_TOKENS
         with attribute("twin-chat"):
             try:
                 response = groq.chat.completions.create(
@@ -639,19 +639,36 @@ class PersonalityEngine:
         messages = self.build_prompt(query, examples, ctx, session_id=session_id, mode=mode)
 
         groq = self._get_groq()
-        t = temperature or LLM_TEMPERATURE
-        mt = max_tokens or LLM_MAX_TOKENS
+        t = temperature if temperature is not None else LLM_TEMPERATURE
+        mt = max_tokens if max_tokens is not None else LLM_MAX_TOKENS
 
         chunks: list[str] = []
         with attribute("twin-chat-stream"):
-            stream = groq.chat.completions.create(
-                model=self._model,
-                messages=messages,
-                temperature=t,
-                max_tokens=mt,
-                top_p=0.9,
-                stream=True,
-            )
+            try:
+                stream = groq.chat.completions.create(
+                    model=self._model,
+                    messages=messages,
+                    temperature=t,
+                    max_tokens=mt,
+                    top_p=0.9,
+                    stream=True,
+                )
+            except Exception as e:
+                error_str = str(e).lower()
+                # Same rate-limit fallback as ask() — streaming shouldn't
+                # be the one path that dies when the primary model is busy.
+                if "429" in error_str or "rate limit" in error_str or "rate_limit" in error_str:
+                    logger.warning("Rate limited on %s, falling back to %s", self._model, GROQ_FALLBACK_MODEL)
+                    stream = groq.chat.completions.create(
+                        model=GROQ_FALLBACK_MODEL,
+                        messages=messages,
+                        temperature=t,
+                        max_tokens=mt,
+                        top_p=0.9,
+                        stream=True,
+                    )
+                else:
+                    raise
             for chunk in stream:
                 try:
                     delta = chunk.choices[0].delta.content
