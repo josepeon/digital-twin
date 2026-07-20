@@ -122,7 +122,29 @@ async def _run_train(
         lora_config=config,
     )
 
-    adapter_path = await tuner.train(dataset, version=version, epochs=epochs)
+    # SIA's FineTuner._format_for_mlx expects flat {"input": ..., "output": ...}
+    # rows, but our pipeline produces chat-format (optionally with a leading
+    # system message). Flatten by finding the first user→assistant pair.
+    flat_dataset = []
+    for row in dataset:
+        if "input" in row and "output" in row:
+            flat_dataset.append(row)
+            continue
+        msgs = row.get("messages") or []
+        user_content = None
+        for msg in msgs:
+            role = msg.get("role")
+            if role == "user" and user_content is None:
+                user_content = msg.get("content")
+            elif role == "assistant" and user_content is not None:
+                flat_dataset.append({
+                    "input": user_content,
+                    "output": msg.get("content", ""),
+                })
+                user_content = None
+                break
+
+    adapter_path = await tuner.train(flat_dataset, version=version, epochs=epochs)
 
     # Register in SIA's model registry so future runs can look it up
     registry = ModelRegistry(output_dir.parent / "registry.json")
@@ -131,7 +153,7 @@ async def _run_train(
             version=version,
             base_model=base_model,
             adapter_path=str(adapter_path),
-            training_dataset_size=len(dataset),
+            training_dataset_size=len(flat_dataset),
             status=ModelStatus.CANARY,  # promote to production manually after eval
         )
     )
