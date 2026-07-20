@@ -35,16 +35,23 @@ policies. Schema is small:
 from __future__ import annotations
 
 import logging
+import os
 import sqlite3
+import threading
 import time
 import uuid
 from pathlib import Path
 from typing import Any
 
+from src.config import DATA_DIR
+
 logger = logging.getLogger(__name__)
 
 
-DEFAULT_DB = Path("data/personal/drafts.db")
+# Anchored to the project data dir (not the CWD) so the queue lands in
+# the same place no matter where the server is launched from. Override
+# with DRAFTS_DB_PATH for Railway volumes.
+DEFAULT_DB = Path(os.environ.get("DRAFTS_DB_PATH", str(DATA_DIR / "drafts.db")))
 
 VALID_STATUSES: tuple[str, ...] = ("pending", "approved", "rejected")
 VALID_CHANNELS: tuple[str, ...] = ("email", "instagram", "whatsapp", "slack", "test")
@@ -56,6 +63,10 @@ class DraftQueue:
     def __init__(self, db_path: str | Path = DEFAULT_DB):
         self._db_path = str(db_path)
         self._conn: sqlite3.Connection | None = None
+        # One connection shared across request threads (check_same_thread
+        # =False) — sqlite3 connections aren't safe for concurrent use,
+        # so serialize access.
+        self._lock = threading.RLock()
         self._init_db()
 
     def _init_db(self) -> None:
@@ -111,12 +122,13 @@ class DraftQueue:
 
         draft_id = f"d-{uuid.uuid4().hex[:12]}"
         now = time.time()
-        self._conn.execute(
-            "INSERT INTO drafts (id, channel, sender, original, draft, "
-            "status, created_at) VALUES (?, ?, ?, ?, ?, 'pending', ?)",
-            (draft_id, channel, sender, original.strip(), draft.strip(), now),
-        )
-        self._conn.commit()
+        with self._lock:
+            self._conn.execute(
+                "INSERT INTO drafts (id, channel, sender, original, draft, "
+                "status, created_at) VALUES (?, ?, ?, ?, ?, 'pending', ?)",
+                (draft_id, channel, sender, original.strip(), draft.strip(), now),
+            )
+            self._conn.commit()
         return draft_id
 
     def approve(self, draft_id: str) -> bool:
@@ -134,10 +146,11 @@ class DraftQueue:
     def delete(self, draft_id: str) -> bool:
         if self._conn is None:
             return False
-        cursor = self._conn.execute(
-            "DELETE FROM drafts WHERE id = ?", (draft_id,)
-        )
-        self._conn.commit()
+        with self._lock:
+            cursor = self._conn.execute(
+                "DELETE FROM drafts WHERE id = ?", (draft_id,)
+            )
+            self._conn.commit()
         return cursor.rowcount > 0
 
     def _set_status(self, draft_id: str, status: str) -> bool:
@@ -145,11 +158,12 @@ class DraftQueue:
             raise ValueError(f"unknown status {status!r}")
         if self._conn is None:
             return False
-        cursor = self._conn.execute(
-            "UPDATE drafts SET status = ?, reviewed_at = ? WHERE id = ?",
-            (status, time.time(), draft_id),
-        )
-        self._conn.commit()
+        with self._lock:
+            cursor = self._conn.execute(
+                "UPDATE drafts SET status = ?, reviewed_at = ? WHERE id = ?",
+                (status, time.time(), draft_id),
+            )
+            self._conn.commit()
         return cursor.rowcount > 0
 
     # ── Queries ──────────────────────────────────────────────────────
@@ -157,11 +171,12 @@ class DraftQueue:
     def get(self, draft_id: str) -> dict[str, Any] | None:
         if self._conn is None:
             return None
-        row = self._conn.execute(
-            "SELECT id, channel, sender, original, draft, status, "
-            "created_at, reviewed_at FROM drafts WHERE id = ?",
-            (draft_id,),
-        ).fetchone()
+        with self._lock:
+            row = self._conn.execute(
+                "SELECT id, channel, sender, original, draft, status, "
+                "created_at, reviewed_at FROM drafts WHERE id = ?",
+                (draft_id,),
+            ).fetchone()
         return self._row_to_dict(row) if row else None
 
     def list_pending(self, limit: int = 50) -> list[dict[str, Any]]:
@@ -170,32 +185,35 @@ class DraftQueue:
     def list_all(self, limit: int = 100) -> list[dict[str, Any]]:
         if self._conn is None:
             return []
-        rows = self._conn.execute(
-            "SELECT id, channel, sender, original, draft, status, "
-            "created_at, reviewed_at FROM drafts "
-            "ORDER BY created_at DESC LIMIT ?",
-            (limit,),
-        ).fetchall()
+        with self._lock:
+            rows = self._conn.execute(
+                "SELECT id, channel, sender, original, draft, status, "
+                "created_at, reviewed_at FROM drafts "
+                "ORDER BY created_at DESC LIMIT ?",
+                (limit,),
+            ).fetchall()
         return [self._row_to_dict(r) for r in rows]
 
     def _list_by_status(self, status: str, limit: int) -> list[dict[str, Any]]:
         if self._conn is None:
             return []
-        rows = self._conn.execute(
-            "SELECT id, channel, sender, original, draft, status, "
-            "created_at, reviewed_at FROM drafts WHERE status = ? "
-            "ORDER BY created_at DESC LIMIT ?",
-            (status, limit),
-        ).fetchall()
+        with self._lock:
+            rows = self._conn.execute(
+                "SELECT id, channel, sender, original, draft, status, "
+                "created_at, reviewed_at FROM drafts WHERE status = ? "
+                "ORDER BY created_at DESC LIMIT ?",
+                (status, limit),
+            ).fetchall()
         return [self._row_to_dict(r) for r in rows]
 
     def stats(self) -> dict[str, int]:
         """{status: count} — backs the dashboard 'how many drafts' card."""
         if self._conn is None:
             return {}
-        rows = self._conn.execute(
-            "SELECT status, COUNT(*) FROM drafts GROUP BY status"
-        ).fetchall()
+        with self._lock:
+            rows = self._conn.execute(
+                "SELECT status, COUNT(*) FROM drafts GROUP BY status"
+            ).fetchall()
         return {row[0]: row[1] for row in rows}
 
     @staticmethod

@@ -10,6 +10,7 @@ from __future__ import annotations
 import logging
 import os
 import sqlite3
+import threading
 import time
 from pathlib import Path
 
@@ -34,6 +35,10 @@ class MemoryStore:
     def __init__(self, db_path: Path | str | None = None):
         self._db_path = str(db_path or _DEFAULT_DB_PATH)
         self._conn: sqlite3.Connection | None = None
+        # One connection shared across request threads (check_same_thread
+        # =False) — sqlite3 connections aren't safe for concurrent use,
+        # so serialize access.
+        self._lock = threading.RLock()
         self._init_db()
 
     def _init_db(self) -> None:
@@ -79,32 +84,35 @@ class MemoryStore:
 
         now = time.time()
         try:
-            # Upsert session
-            self._conn.execute(
-                """INSERT INTO sessions (session_id, created_at, last_active)
-                   VALUES (?, ?, ?)
-                   ON CONFLICT(session_id) DO UPDATE SET last_active = ?""",
-                (session_id, now, now, now),
-            )
+            with self._lock:
+                # Upsert session
+                self._conn.execute(
+                    """INSERT INTO sessions (session_id, created_at, last_active)
+                       VALUES (?, ?, ?)
+                       ON CONFLICT(session_id) DO UPDATE SET last_active = ?""",
+                    (session_id, now, now, now),
+                )
 
-            # Insert message
-            self._conn.execute(
-                "INSERT INTO messages (session_id, role, content, timestamp) VALUES (?, ?, ?, ?)",
-                (session_id, role, content, now),
-            )
+                # Insert message
+                self._conn.execute(
+                    "INSERT INTO messages (session_id, role, content, timestamp) VALUES (?, ?, ?, ?)",
+                    (session_id, role, content, now),
+                )
 
-            # Trim to sliding window
-            self._conn.execute(
-                """DELETE FROM messages WHERE id NOT IN (
-                    SELECT id FROM messages
-                    WHERE session_id = ?
-                    ORDER BY timestamp DESC
-                    LIMIT ?
-                ) AND session_id = ?""",
-                (session_id, MAX_HISTORY_MESSAGES, session_id),
-            )
+                # Trim to sliding window — order by id, not timestamp:
+                # a user+assistant pair lands within the same clock tick,
+                # and a timestamp tie could evict the wrong row.
+                self._conn.execute(
+                    """DELETE FROM messages WHERE id NOT IN (
+                        SELECT id FROM messages
+                        WHERE session_id = ?
+                        ORDER BY id DESC
+                        LIMIT ?
+                    ) AND session_id = ?""",
+                    (session_id, MAX_HISTORY_MESSAGES, session_id),
+                )
 
-            self._conn.commit()
+                self._conn.commit()
         except Exception as e:
             logger.error("Failed to add message: %s", e)
 
@@ -114,14 +122,15 @@ class MemoryStore:
             return []
 
         try:
-            cursor = self._conn.execute(
-                """SELECT role, content FROM messages
-                   WHERE session_id = ?
-                   ORDER BY timestamp ASC
-                   LIMIT ?""",
-                (session_id, MAX_HISTORY_MESSAGES),
-            )
-            return [{"role": row[0], "content": row[1]} for row in cursor.fetchall()]
+            with self._lock:
+                cursor = self._conn.execute(
+                    """SELECT role, content FROM messages
+                       WHERE session_id = ?
+                       ORDER BY id ASC
+                       LIMIT ?""",
+                    (session_id, MAX_HISTORY_MESSAGES),
+                )
+                return [{"role": row[0], "content": row[1]} for row in cursor.fetchall()]
         except Exception as e:
             logger.error("Failed to get history: %s", e)
             return []
@@ -132,9 +141,10 @@ class MemoryStore:
             return
 
         try:
-            self._conn.execute("DELETE FROM messages WHERE session_id = ?", (session_id,))
-            self._conn.execute("DELETE FROM sessions WHERE session_id = ?", (session_id,))
-            self._conn.commit()
+            with self._lock:
+                self._conn.execute("DELETE FROM messages WHERE session_id = ?", (session_id,))
+                self._conn.execute("DELETE FROM sessions WHERE session_id = ?", (session_id,))
+                self._conn.commit()
         except Exception as e:
             logger.error("Failed to clear session: %s", e)
 
@@ -144,19 +154,20 @@ class MemoryStore:
             return 0
 
         try:
-            cutoff = time.time() - SESSION_TTL_SECS
-            cursor = self._conn.execute(
-                "SELECT session_id FROM sessions WHERE last_active < ?", (cutoff,)
-            )
-            expired = [row[0] for row in cursor.fetchall()]
+            with self._lock:
+                cutoff = time.time() - SESSION_TTL_SECS
+                cursor = self._conn.execute(
+                    "SELECT session_id FROM sessions WHERE last_active < ?", (cutoff,)
+                )
+                expired = [row[0] for row in cursor.fetchall()]
 
-            if expired:
-                placeholders = ",".join("?" * len(expired))
-                self._conn.execute(f"DELETE FROM messages WHERE session_id IN ({placeholders})", expired)
-                self._conn.execute(f"DELETE FROM sessions WHERE session_id IN ({placeholders})", expired)
-                self._conn.commit()
+                if expired:
+                    placeholders = ",".join("?" * len(expired))
+                    self._conn.execute(f"DELETE FROM messages WHERE session_id IN ({placeholders})", expired)
+                    self._conn.execute(f"DELETE FROM sessions WHERE session_id IN ({placeholders})", expired)
+                    self._conn.commit()
 
-            return len(expired)
+                return len(expired)
         except Exception as e:
             logger.error("Failed to cleanup expired sessions: %s", e)
             return 0
@@ -166,13 +177,15 @@ class MemoryStore:
         if self._conn is None:
             return 0
         try:
-            cursor = self._conn.execute("SELECT COUNT(*) FROM sessions")
-            return cursor.fetchone()[0]
+            with self._lock:
+                cursor = self._conn.execute("SELECT COUNT(*) FROM sessions")
+                return cursor.fetchone()[0]
         except Exception:
             return 0
 
     def close(self) -> None:
         """Close the database connection."""
-        if self._conn:
-            self._conn.close()
-            self._conn = None
+        with self._lock:
+            if self._conn:
+                self._conn.close()
+                self._conn = None

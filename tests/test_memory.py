@@ -128,3 +128,42 @@ class TestWalMode:
         # WAL mode is set in _init_db; verify via PRAGMA
         cursor = store._conn.execute("PRAGMA journal_mode")
         assert cursor.fetchone()[0].lower() == "wal"
+
+
+class TestThreadSafety:
+    def test_concurrent_writers_dont_corrupt(self, store):
+        import threading
+
+        errors: list[Exception] = []
+
+        def writer(session: str) -> None:
+            try:
+                for i in range(50):
+                    store.add_message(session, "user", f"msg {i}")
+            except Exception as exc:  # noqa: BLE001
+                errors.append(exc)
+
+        threads = [
+            threading.Thread(target=writer, args=(f"s{n}",)) for n in range(8)
+        ]
+        for t in threads:
+            t.start()
+        for t in threads:
+            t.join()
+
+        assert errors == []
+        # Each session keeps its own trimmed window, in insertion order
+        for n in range(8):
+            history = store.get_history(f"s{n}")
+            assert len(history) == 20
+            assert history[-1]["content"] == "msg 49"
+
+    def test_history_preserves_same_tick_ordering(self, store):
+        # user + assistant pairs land within the same clock tick; insertion
+        # order (id) must win over timestamp ties
+        for i in range(5):
+            store.add_message("s", "user", f"q{i}")
+            store.add_message("s", "assistant", f"a{i}")
+        history = store.get_history("s")
+        roles = [h["role"] for h in history]
+        assert roles == ["user", "assistant"] * 5
