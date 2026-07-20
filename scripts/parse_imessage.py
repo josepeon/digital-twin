@@ -166,6 +166,28 @@ def parse_imessage_db(
     return results
 
 
+def _append_processed(messages: "list[ParsedMessage]", filename: str) -> None:
+    """Append parsed rows to the processed JSONL (incremental ingest)."""
+    from src.config import PROCESSED_DIR
+
+    out = PROCESSED_DIR / filename
+    out.parent.mkdir(parents=True, exist_ok=True)
+    with open(out, "a", encoding="utf-8") as f:
+        for msg in messages:
+            f.write(json.dumps(msg.to_dict(), ensure_ascii=False) + "\n")
+
+
+def parse_file(path: Path) -> "list[ParsedMessage]":
+    """Entry point for scripts/ingest_new_data.py dispatch.
+
+    Accepts a chat.db SQLite file; appends results to the default
+    processed JSONL.
+    """
+    messages = parse_imessage_db(Path(path))
+    _append_processed(messages, "imessage_parsed.jsonl")
+    return messages
+
+
 def main() -> None:
     default_db = Path.home() / "Library" / "Messages" / "chat.db"
     local_copy = Path("data/personal/raw/imessage/chat.db")

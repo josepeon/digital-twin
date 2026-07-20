@@ -269,6 +269,38 @@ def parse_email_export(
     return all_messages
 
 
+def _append_processed(messages: "list[ParsedMessage]", filename: str) -> None:
+    """Append parsed rows to the processed JSONL (incremental ingest)."""
+    from src.config import PROCESSED_DIR
+
+    out = PROCESSED_DIR / filename
+    out.parent.mkdir(parents=True, exist_ok=True)
+    with open(out, "a", encoding="utf-8") as f:
+        for msg in messages:
+            f.write(json.dumps(msg.to_dict(), ensure_ascii=False) + "\n")
+
+
+def parse_file(path: Path) -> "list[ParsedMessage]":
+    """Entry point for scripts/ingest_new_data.py dispatch.
+
+    Accepts a directory of .mbox/.eml files. Jose's addresses come from
+    the JOSE_EMAILS env var (comma-separated) since there's no CLI here.
+    Appends results to the default processed JSONL.
+    """
+    import os
+
+    emails = [e.strip() for e in os.environ.get("JOSE_EMAILS", "").split(",") if e.strip()]
+    if not emails:
+        raise ValueError(
+            "Set JOSE_EMAILS (comma-separated) so sent mail can be identified"
+        )
+    path = Path(path)
+    email_dir = path if path.is_dir() else path.parent
+    messages = parse_email_export(email_dir, emails)
+    _append_processed(messages, "email_parsed.jsonl")
+    return messages
+
+
 def main() -> None:
     parser = argparse.ArgumentParser(description="Parse email exports into training format")
     parser.add_argument(

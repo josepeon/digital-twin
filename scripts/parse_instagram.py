@@ -293,6 +293,33 @@ def parse_instagram_export(
     return dms + posts + comments
 
 
+def _append_processed(messages: "list[ParsedMessage]", filename: str) -> None:
+    """Append parsed rows to the processed JSONL (incremental ingest)."""
+    from src.config import PROCESSED_DIR
+
+    out = PROCESSED_DIR / filename
+    out.parent.mkdir(parents=True, exist_ok=True)
+    with open(out, "a", encoding="utf-8") as f:
+        for msg in messages:
+            f.write(json.dumps(msg.to_dict(), ensure_ascii=False) + "\n")
+
+
+def parse_file(path: Path) -> "list[ParsedMessage]":
+    """Entry point for scripts/ingest_new_data.py dispatch.
+
+    Instagram exports are directories; a file inside one resolves to
+    its export root. Appends results to the default processed JSONL.
+    """
+    path = Path(path)
+    if not path.is_dir():
+        raise ValueError(
+            f"Instagram ingest expects the export directory, got file: {path}"
+        )
+    messages = parse_instagram_export(path)
+    _append_processed(messages, "instagram_parsed.jsonl")
+    return messages
+
+
 def main() -> None:
     parser = argparse.ArgumentParser(description="Parse Instagram export into training format")
     parser.add_argument(

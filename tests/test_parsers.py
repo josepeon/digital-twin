@@ -115,3 +115,55 @@ class TestWhatsAppParser:
         messages = parse_whatsapp_file(filepath, scrub_pii=False)
         assert len(messages) == 1
         assert "real message" in messages[0].text
+
+
+class TestParseFileWrappers:
+    """parse_file(path) is the dispatch contract for ingest_new_data.py."""
+
+    WHATSAPP_CHAT = """[1/15/24, 2:30:15 PM] Other Person: Hey, how are you?
+[1/15/24, 2:31:00 PM] Jose Peon: Doing great, working on this really cool AI project right now
+"""
+
+    def test_all_parsers_expose_parse_file(self):
+        import importlib
+
+        for name in (
+            "parse_chatgpt", "parse_whatsapp", "parse_instagram",
+            "parse_imessage", "parse_email",
+        ):
+            module = importlib.import_module(f"scripts.{name}")
+            assert callable(getattr(module, "parse_file", None)), name
+
+    def test_whatsapp_parse_file_appends_processed(self, tmp_path, monkeypatch):
+        import json
+
+        import src.config as config
+        from scripts.parse_whatsapp import parse_file
+
+        monkeypatch.setattr(config, "PROCESSED_DIR", tmp_path / "processed")
+
+        chat = tmp_path / "chat.txt"
+        chat.write_text(self.WHATSAPP_CHAT)
+
+        messages = parse_file(chat)
+        assert len(messages) == 1
+
+        out = tmp_path / "processed" / "whatsapp_parsed.jsonl"
+        assert out.exists()
+        rows = [json.loads(line) for line in out.read_text().splitlines()]
+        assert len(rows) == 1
+        assert "AI project" in rows[0]["text"]
+
+        # Second ingest appends rather than overwriting
+        parse_file(chat)
+        rows = [json.loads(line) for line in out.read_text().splitlines()]
+        assert len(rows) == 2
+
+    def test_email_parse_file_requires_addresses(self, tmp_path, monkeypatch):
+        import pytest
+
+        from scripts.parse_email import parse_file
+
+        monkeypatch.delenv("JOSE_EMAILS", raising=False)
+        with pytest.raises(ValueError, match="JOSE_EMAILS"):
+            parse_file(tmp_path)

@@ -250,6 +250,32 @@ def parse_whatsapp_export(
     return all_messages
 
 
+def _append_processed(messages: "list[ParsedMessage]", filename: str) -> None:
+    """Append parsed rows to the processed JSONL (incremental ingest)."""
+    from src.config import PROCESSED_DIR
+
+    out = PROCESSED_DIR / filename
+    out.parent.mkdir(parents=True, exist_ok=True)
+    with open(out, "a", encoding="utf-8") as f:
+        for msg in messages:
+            f.write(json.dumps(msg.to_dict(), ensure_ascii=False) + "\n")
+
+
+def parse_file(path: Path) -> "list[ParsedMessage]":
+    """Entry point for scripts/ingest_new_data.py dispatch.
+
+    Accepts a single WhatsApp .txt export or a directory of them;
+    appends results to the default processed JSONL.
+    """
+    path = Path(path)
+    if path.is_dir():
+        messages = parse_whatsapp_export(path)
+    else:
+        messages = parse_whatsapp_file(path)
+    _append_processed(messages, "whatsapp_parsed.jsonl")
+    return messages
+
+
 def main() -> None:
     parser = argparse.ArgumentParser(description="Parse WhatsApp exports into training format")
     parser.add_argument(
