@@ -175,7 +175,8 @@ async def ask_jose(req: AskRequest) -> AskResponse:
         raise HTTPException(status_code=503, detail="Personality engine not initialized")
 
     try:
-        result = _engine.ask(
+        result = await asyncio.to_thread(
+            _engine.ask,
             query=req.query,
             temperature=req.temperature,
             session_id=req.session_id,
@@ -206,16 +207,23 @@ async def ask_jose_voice(req: AskRequest) -> Response:
         raise HTTPException(status_code=503, detail="Voice engine not initialized")
 
     # Generate text response
-    result = _engine.ask(
-        query=req.query,
-        temperature=req.temperature,
-        session_id=req.session_id,
-        mode=req.mode or "default",
-    )
+    try:
+        result = await asyncio.to_thread(
+            _engine.ask,
+            query=req.query,
+            temperature=req.temperature,
+            session_id=req.session_id,
+            mode=req.mode or "default",
+        )
+    except Exception as exc:  # noqa: BLE001 — surface as 500, never crash
+        import logging as _logging
+        _logging.getLogger(__name__).exception("ask_jose_voice failed")
+        raise HTTPException(status_code=500, detail=f"engine error: {exc}") from exc
 
     # Convert to speech
     try:
-        audio_bytes = _voice.speak(
+        audio_bytes = await asyncio.to_thread(
+            _voice.speak,
             text=result["response"],
             language=result["language"],
         )
@@ -242,12 +250,18 @@ async def ask_jose_stream(req: AskRequest) -> StreamingResponse:
         raise HTTPException(status_code=503, detail="Voice engine not initialized")
 
     # Generate text response
-    result = _engine.ask(
-        query=req.query,
-        temperature=req.temperature,
-        session_id=req.session_id,
-        mode=req.mode or "default",
-    )
+    try:
+        result = await asyncio.to_thread(
+            _engine.ask,
+            query=req.query,
+            temperature=req.temperature,
+            session_id=req.session_id,
+            mode=req.mode or "default",
+        )
+    except Exception as exc:  # noqa: BLE001 — surface as 500, never crash
+        import logging as _logging
+        _logging.getLogger(__name__).exception("ask_jose_stream failed")
+        raise HTTPException(status_code=500, detail=f"engine error: {exc}") from exc
 
     # Stream audio
     def audio_stream():
@@ -517,7 +531,9 @@ async def create_draft(req: DraftRequest) -> DraftRecord:
     from src.agent import draft_reply
 
     try:
-        draft_text = draft_reply(_engine, req.channel, req.original, req.sender)
+        draft_text = await asyncio.to_thread(
+            draft_reply, _engine, req.channel, req.original, req.sender
+        )
     except Exception as exc:  # noqa: BLE001
         raise HTTPException(status_code=500, detail=f"draft generation failed: {exc}") from exc
 
