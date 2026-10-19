@@ -57,3 +57,4 @@ logs/
 
 # ── Jupyter ───────────────────────────────────────────────────────────────────
 .ipynb_checkpoints/
+data/personal/rag_index/
