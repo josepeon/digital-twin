@@ -6,9 +6,11 @@ FROM python:3.11-slim AS builder
 
 WORKDIR /app
 
-# System deps for sentence-transformers (builds native extensions)
+# System deps: build-essential for sentence-transformers' native extensions,
+# git for the self-improving-agent git dependency in requirements.txt
 RUN apt-get update && apt-get install -y --no-install-recommends \
     build-essential \
+    git \
     && rm -rf /var/lib/apt/lists/*
 
 COPY requirements.txt .
