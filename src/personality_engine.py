@@ -46,6 +46,17 @@ def _record_groq_usage(response, model: str) -> None:
 
 logger = logging.getLogger(__name__)
 
+
+def _groq_extra_opts(model: str) -> dict:
+    """Per-model extra request options for Groq.
+
+    gpt-oss models accept reasoning_effort; 'low' keeps replies snappy and
+    stops internal reasoning from eating the token budget.
+    """
+    if model.startswith("openai/gpt-oss"):
+        return {"extra_body": {"reasoning_effort": "low"}}
+    return {}
+
 from src.config import (
     EMBEDDING_MODEL,
     GROQ_API_KEY,
@@ -592,21 +603,33 @@ class PersonalityEngine:
                     temperature=t,
                     max_tokens=mt,
                     top_p=0.9,
+                    **_groq_extra_opts(self._model),
                 )
                 text = response.choices[0].message.content
                 model_used = self._model
                 _record_groq_usage(response, model_used)
             except Exception as e:
                 error_str = str(e).lower()
-                # Only fallback on rate limit / availability errors
-                if "429" in error_str or "rate limit" in error_str or "rate_limit" in error_str:
-                    logger.warning("Rate limited on %s, falling back to %s", self._model, GROQ_FALLBACK_MODEL)
+                # Fall back on rate limits AND dead/unavailable models. Groq
+                # retires models with little notice (the 2026-08-16 Llama
+                # shutdown silently broke the twin) — model_not_found must
+                # degrade to the fallback, not take the twin down.
+                is_rate_limit = "429" in error_str or "rate limit" in error_str or "rate_limit" in error_str
+                is_dead_model = (
+                    "decommissioned" in error_str
+                    or "model_not_found" in error_str
+                    or "does not exist" in error_str
+                )
+                if is_rate_limit or is_dead_model:
+                    reason = "Rate limited" if is_rate_limit else "Model unavailable"
+                    logger.warning("%s on %s, falling back to %s", reason, self._model, GROQ_FALLBACK_MODEL)
                     response = groq.chat.completions.create(
                         model=GROQ_FALLBACK_MODEL,
                         messages=messages,
                         temperature=t,
                         max_tokens=mt,
                         top_p=0.9,
+                        **_groq_extra_opts(GROQ_FALLBACK_MODEL),
                     )
                     text = response.choices[0].message.content
                     model_used = GROQ_FALLBACK_MODEL
@@ -680,13 +703,22 @@ class PersonalityEngine:
                     max_tokens=mt,
                     top_p=0.9,
                     stream=True,
+                    **_groq_extra_opts(self._model),
                 )
             except Exception as e:
                 error_str = str(e).lower()
-                # Same rate-limit fallback as ask() — streaming shouldn't
-                # be the one path that dies when the primary model is busy.
-                if "429" in error_str or "rate limit" in error_str or "rate_limit" in error_str:
-                    logger.warning("Rate limited on %s, falling back to %s", self._model, GROQ_FALLBACK_MODEL)
+                # Same fallback as ask(): rate limits AND dead models —
+                # streaming shouldn't be the one path that dies when the
+                # primary model is busy or retired.
+                is_rate_limit = "429" in error_str or "rate limit" in error_str or "rate_limit" in error_str
+                is_dead_model = (
+                    "decommissioned" in error_str
+                    or "model_not_found" in error_str
+                    or "does not exist" in error_str
+                )
+                if is_rate_limit or is_dead_model:
+                    reason = "Rate limited" if is_rate_limit else "Model unavailable"
+                    logger.warning("%s on %s, falling back to %s", reason, self._model, GROQ_FALLBACK_MODEL)
                     stream = groq.chat.completions.create(
                         model=GROQ_FALLBACK_MODEL,
                         messages=messages,
@@ -694,6 +726,7 @@ class PersonalityEngine:
                         max_tokens=mt,
                         top_p=0.9,
                         stream=True,
+                        **_groq_extra_opts(GROQ_FALLBACK_MODEL),
                     )
                 else:
                     raise

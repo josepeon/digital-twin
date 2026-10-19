@@ -31,10 +31,14 @@ ELEVENLABS_API_KEY: str = os.getenv("ELEVENLABS_API_KEY", "")
 TWIN_API_KEY: str = os.getenv("TWIN_API_KEY", "")
 
 # ── Model Config ───────────────────────────────────────────────────────────────
-GROQ_MODEL: str = os.getenv("GROQ_MODEL", "llama-3.3-70b-versatile")
-GROQ_FALLBACK_MODEL: str = os.getenv("GROQ_FALLBACK_MODEL", "qwen/qwen3-32b")
+# Groq decommissioned all Llama chat models (and qwen3-32b) on 2026-08-16;
+# gpt-oss-120b/20b are the current production replacements.
+GROQ_MODEL: str = os.getenv("GROQ_MODEL", "openai/gpt-oss-120b")
+GROQ_FALLBACK_MODEL: str = os.getenv("GROQ_FALLBACK_MODEL", "openai/gpt-oss-20b")
 LLM_TEMPERATURE: float = float(os.getenv("LLM_TEMPERATURE", "0.7"))
-LLM_MAX_TOKENS: int = int(os.getenv("LLM_MAX_TOKENS", "256"))
+# gpt-oss models spend completion tokens on internal reasoning before the
+# visible answer, so this must be larger than the old 256.
+LLM_MAX_TOKENS: int = int(os.getenv("LLM_MAX_TOKENS", "512"))
 
 # ── RAG Config ─────────────────────────────────────────────────────────────────
 EMBEDDING_MODEL: str = os.getenv("EMBEDDING_MODEL", "all-MiniLM-L6-v2")

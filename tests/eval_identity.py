@@ -491,10 +491,11 @@ def run_style_eval(
 
         try:
             judge_resp = client.chat.completions.create(
-                model="llama-3.3-70b-versatile",
+                model="openai/gpt-oss-120b",  # llama judge was decommissioned by Groq 2026-08-16
                 messages=[{"role": "user", "content": prompt}],
                 temperature=0.0,
-                max_tokens=150,
+                max_tokens=400,  # gpt-oss spends completion tokens on reasoning
+                extra_body={"reasoning_effort": "low"},
             )
             raw = judge_resp.choices[0].message.content.strip()
 

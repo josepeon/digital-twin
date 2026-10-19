@@ -1,6 +1,6 @@
 # Digital Twin — Jose Peon
 
-AI digital twin of Jose Peon — RAG personality engine + Groq 70B + ElevenLabs dual-voice clone (EN/ES). WebSocket chat, voice I/O, PWA-installable web UI.
+AI digital twin of Jose Peon — RAG personality engine + Groq gpt-oss-120B + ElevenLabs dual-voice clone (EN/ES). WebSocket chat, voice I/O, PWA-installable web UI.
 
 ## Architecture
 
