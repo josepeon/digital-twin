@@ -13,8 +13,16 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     git \
     && rm -rf /var/lib/apt/lists/*
 
+# A venv so the CPU-only torch installed first satisfies the torch that
+# sentence-transformers asks for. The default PyPI wheel bundles several GB
+# of CUDA libraries this CPU container never uses, and the image that size
+# timed out Railway's image export.
+RUN python -m venv /opt/venv
+ENV PATH=/opt/venv/bin:$PATH
+RUN pip install --no-cache-dir torch --index-url https://download.pytorch.org/whl/cpu
+
 COPY requirements.txt .
-RUN pip install --no-cache-dir --prefix=/install -r requirements.txt
+RUN pip install --no-cache-dir -r requirements.txt
 
 # ── Stage 2: Runtime ───────────────────────────────────────────────────────────
 FROM python:3.11-slim
@@ -22,7 +30,8 @@ FROM python:3.11-slim
 WORKDIR /app
 
 # Copy installed packages from builder
-COPY --from=builder /install /usr/local
+COPY --from=builder /opt/venv /opt/venv
+ENV PATH=/opt/venv/bin:$PATH
 
 # Copy application code
 COPY src/ src/
