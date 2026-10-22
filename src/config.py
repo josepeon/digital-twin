@@ -29,6 +29,10 @@ RAW_EMAIL = RAW_DIR / "email"
 GROQ_API_KEY: str = os.getenv("GROQ_API_KEY", "")
 ELEVENLABS_API_KEY: str = os.getenv("ELEVENLABS_API_KEY", "")
 TWIN_API_KEY: str = os.getenv("TWIN_API_KEY", "")
+# Shipped inside josepeon.co's browser bundle, so treat it as public: it opens
+# the chat endpoints only. TWIN_API_KEY stays secret and is the only key the
+# /agent/* draft-queue endpoints accept.
+TWIN_PUBLIC_KEY: str = os.getenv("TWIN_PUBLIC_KEY", "")
 
 # ── Model Config ───────────────────────────────────────────────────────────────
 # Groq decommissioned all Llama chat models (and qwen3-32b) on 2026-08-16;

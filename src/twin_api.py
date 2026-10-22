@@ -27,7 +27,7 @@ from fastapi.responses import FileResponse, Response, StreamingResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field
 
-from src.config import TWIN_API_KEY
+from src.config import TWIN_API_KEY, TWIN_PUBLIC_KEY
 from src.memory import MemoryStore
 from src.observability import (
     attribute as _attribute,
@@ -102,19 +102,38 @@ if _static_dir.exists():
 
 # ── Auth ───────────────────────────────────────────────────────────────────────
 
-async def verify_api_key(request: Request) -> None:
-    """Validate the API key from the Authorization header."""
-    if not TWIN_API_KEY:
-        return  # No key configured = open access (dev mode)
-
+def _request_token(request: Request) -> str:
     auth = request.headers.get("Authorization", "")
     if auth.startswith("Bearer "):
-        token = auth[7:]
-    else:
-        token = request.headers.get("X-API-Key", "")
+        return auth[7:]
+    return request.headers.get("X-API-Key", "")
 
-    if not secrets.compare_digest(token, TWIN_API_KEY):
+
+def _key_matches(token: str, *, allow_public: bool) -> bool:
+    if secrets.compare_digest(token, TWIN_API_KEY):
+        return True
+    return allow_public and bool(TWIN_PUBLIC_KEY) and secrets.compare_digest(token, TWIN_PUBLIC_KEY)
+
+
+async def verify_api_key(request: Request) -> None:
+    """Admin key only (draft queue). The public site key is refused here."""
+    if not TWIN_API_KEY:
+        return  # No key configured = open access (dev mode)
+    if not _key_matches(_request_token(request), allow_public=False):
         raise HTTPException(status_code=401, detail="Invalid API key")
+
+
+async def verify_client_key(request: Request) -> None:
+    """Chat endpoints: the admin key or the public site key."""
+    if not TWIN_API_KEY:
+        return
+    if not _key_matches(_request_token(request), allow_public=True):
+        raise HTTPException(status_code=401, detail="Invalid API key")
+
+
+def _log_failure(what: str) -> None:
+    import logging as _logging
+    _logging.getLogger(__name__).exception(what)
 
 
 # ── Models ─────────────────────────────────────────────────────────────────────
@@ -183,7 +202,7 @@ async def metrics_endpoint() -> Response:
     )
 
 
-@app.post("/ask-jose", response_model=AskResponse, dependencies=[Depends(verify_api_key)])
+@app.post("/ask-jose", response_model=AskResponse, dependencies=[Depends(verify_client_key)])
 async def ask_jose(req: AskRequest) -> AskResponse:
     """Ask Jose a question — returns text response."""
     if _engine is None:
@@ -203,7 +222,7 @@ async def ask_jose(req: AskRequest) -> AskResponse:
     except Exception as exc:  # noqa: BLE001 — surface as 500, never crash
         import logging as _logging
         _logging.getLogger(__name__).exception("ask_jose failed")
-        raise HTTPException(status_code=500, detail=f"engine error: {exc}") from exc
+        raise HTTPException(status_code=500, detail="engine error") from exc
 
     return AskResponse(
         response=result["response"],
@@ -214,7 +233,7 @@ async def ask_jose(req: AskRequest) -> AskResponse:
     )
 
 
-@app.post("/ask-jose/voice", dependencies=[Depends(verify_api_key)])
+@app.post("/ask-jose/voice", dependencies=[Depends(verify_client_key)])
 async def ask_jose_voice(req: AskRequest) -> Response:
     """Ask Jose a question — returns MP3 audio response."""
     if _engine is None:
@@ -235,7 +254,7 @@ async def ask_jose_voice(req: AskRequest) -> Response:
     except Exception as exc:  # noqa: BLE001 — surface as 500, never crash
         import logging as _logging
         _logging.getLogger(__name__).exception("ask_jose_voice failed")
-        raise HTTPException(status_code=500, detail=f"engine error: {exc}") from exc
+        raise HTTPException(status_code=500, detail="engine error") from exc
 
     # Convert to speech
     try:
@@ -244,8 +263,9 @@ async def ask_jose_voice(req: AskRequest) -> Response:
             text=result["response"],
             language=result["language"],
         )
-    except Exception as e:
-        raise HTTPException(status_code=502, detail=f"TTS failed: {e}")
+    except Exception:  # noqa: BLE001
+        _log_failure("TTS failed")
+        raise HTTPException(status_code=502, detail="Voice is unavailable right now")
 
     return Response(
         content=audio_bytes,
@@ -258,7 +278,7 @@ async def ask_jose_voice(req: AskRequest) -> Response:
     )
 
 
-@app.post("/ask-jose/stream", dependencies=[Depends(verify_api_key)])
+@app.post("/ask-jose/stream", dependencies=[Depends(verify_client_key)])
 async def ask_jose_stream(req: AskRequest) -> StreamingResponse:
     """Ask Jose a question — returns streaming MP3 audio."""
     if _engine is None:
@@ -279,7 +299,7 @@ async def ask_jose_stream(req: AskRequest) -> StreamingResponse:
     except Exception as exc:  # noqa: BLE001 — surface as 500, never crash
         import logging as _logging
         _logging.getLogger(__name__).exception("ask_jose_stream failed")
-        raise HTTPException(status_code=500, detail=f"engine error: {exc}") from exc
+        raise HTTPException(status_code=500, detail="engine error") from exc
 
     # Stream audio
     def audio_stream():
@@ -298,7 +318,7 @@ async def ask_jose_stream(req: AskRequest) -> StreamingResponse:
     )
 
 
-@app.post("/ask-jose/stream-sse", dependencies=[Depends(verify_api_key)])
+@app.post("/ask-jose/stream-sse", dependencies=[Depends(verify_client_key)])
 async def ask_jose_stream_sse(req: AskRequest) -> StreamingResponse:
     """Ask Jose a question — streams the text response as Server-Sent Events.
 
@@ -345,7 +365,7 @@ async def ask_jose_stream_sse(req: AskRequest) -> StreamingResponse:
 # ── Speech-to-Text ─────────────────────────────────────────────────────────────
 
 
-@app.post("/transcribe", dependencies=[Depends(verify_api_key)])
+@app.post("/transcribe", dependencies=[Depends(verify_client_key)])
 async def transcribe_audio(audio: UploadFile = File(...)):
     """Transcribe audio to text using Groq Whisper.
 
@@ -388,8 +408,9 @@ async def transcribe_audio(audio: UploadFile = File(...)):
         except Exception:  # noqa: BLE001
             pass
         return {"text": text, "language": "auto"}
-    except Exception as e:
-        raise HTTPException(status_code=502, detail=f"Transcription failed: {e}")
+    except Exception:  # noqa: BLE001
+        _log_failure("transcription failed")
+        raise HTTPException(status_code=502, detail="Transcription failed")
 
 
 # ── WebSocket Streaming ────────────────────────────────────────────────────────
@@ -414,7 +435,7 @@ async def websocket_endpoint(ws: WebSocket):
         first_msg = json.loads(raw)
 
         if first_msg.get("type") == "auth":
-            if TWIN_API_KEY and first_msg.get("key") != TWIN_API_KEY:
+            if TWIN_API_KEY and not _key_matches(str(first_msg.get("key", "")), allow_public=True):
                 await ws.send_json({"type": "error", "content": "Invalid API key"})
                 await ws.close(code=4001)
                 return
@@ -432,9 +453,10 @@ async def websocket_endpoint(ws: WebSocket):
 
     except WebSocketDisconnect:
         return
-    except Exception as e:
+    except Exception:  # noqa: BLE001
+        _log_failure("ws query failed")
         try:
-            await ws.send_json({"type": "error", "content": str(e)})
+            await ws.send_json({"type": "error", "content": "Something went wrong, please try again"})
         except Exception:
             pass
         return
@@ -452,9 +474,10 @@ async def websocket_endpoint(ws: WebSocket):
             await _handle_ws_query(ws, msg)
         except WebSocketDisconnect:
             return
-        except Exception as e:  # noqa: BLE001
+        except Exception:  # noqa: BLE001
+            _log_failure("ws query failed")
             try:
-                await ws.send_json({"type": "error", "content": str(e)})
+                await ws.send_json({"type": "error", "content": "Something went wrong, please try again"})
             except Exception:  # noqa: BLE001 — socket already gone
                 return
 
@@ -502,8 +525,11 @@ async def _handle_ws_query(ws: WebSocket, msg: dict) -> None:
                 "type": "audio",
                 "content": audio_b64,
             })
-        except Exception as e:
-            await ws.send_json({"type": "error", "content": f"TTS failed: {e}"})
+        except Exception:  # noqa: BLE001
+            # Not an "error" frame: the site widget would replace the reply
+            # it already showed. Clients that don't know this type ignore it.
+            _log_failure("TTS failed (ws)")
+            await ws.send_json({"type": "voice_unavailable"})
 
 
 # ── Draft Queue (T3.3) ─────────────────────────────────────────────────────────

@@ -125,6 +125,59 @@ class TestAuth:
         assert response.status_code == 200
 
 
+    def test_public_key_opens_chat(self, client, monkeypatch):
+        from src import twin_api as api_module
+
+        monkeypatch.setattr(api_module, "TWIN_API_KEY", "admin-key")
+        monkeypatch.setattr(api_module, "TWIN_PUBLIC_KEY", "site-key")
+        response = client.post(
+            "/ask-jose",
+            json={"query": "hi"},
+            headers={"Authorization": "Bearer site-key"},
+        )
+        assert response.status_code == 200
+
+    def test_public_key_cannot_reach_draft_queue(self, client, monkeypatch):
+        from src import twin_api as api_module
+
+        monkeypatch.setattr(api_module, "TWIN_API_KEY", "admin-key")
+        monkeypatch.setattr(api_module, "TWIN_PUBLIC_KEY", "site-key")
+        response = client.get(
+            "/agent/queue", headers={"Authorization": "Bearer site-key"}
+        )
+        assert response.status_code == 401
+
+    def test_empty_public_key_never_matches(self, client, monkeypatch):
+        from src import twin_api as api_module
+
+        monkeypatch.setattr(api_module, "TWIN_API_KEY", "admin-key")
+        monkeypatch.setattr(api_module, "TWIN_PUBLIC_KEY", "")
+        response = client.post(
+            "/ask-jose", json={"query": "hi"}, headers={"Authorization": "Bearer "}
+        )
+        assert response.status_code == 401
+
+
+class TestErrorDetails:
+    def test_tts_failure_does_not_leak_upstream_detail(self, client):
+        client._fake_voice.speak.side_effect = RuntimeError(
+            "headers: {'x-secret-upstream': 'abc'}"
+        )
+        response = client.post("/ask-jose/voice", json={"query": "hi"})
+        assert response.status_code == 502
+        assert "headers" not in response.text
+        assert response.json()["detail"] == "Voice is unavailable right now"
+
+    def test_ws_tts_failure_keeps_the_text_answer(self, client):
+        client._fake_voice.speak.side_effect = RuntimeError("upstream 401")
+        with client.websocket_connect("/ws") as ws:
+            ws.send_json({"query": "hi", "voice": True})
+            first = ws.receive_json()
+            second = ws.receive_json()
+        assert first["type"] == "text"
+        assert second == {"type": "voice_unavailable"}
+
+
 # ---------------------------------------------------------------------
 # /ask-jose (text)
 # ---------------------------------------------------------------------

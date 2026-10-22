@@ -57,7 +57,7 @@ uvicorn src.twin_api:app --host 127.0.0.1 --port 8000
 | `/ws` | WebSocket | Real-time chat (text + audio) |
 | `/health` | GET | Health / status check |
 
-All endpoints (except `/health` and `/`) require `Authorization: Bearer <TWIN_API_KEY>`.
+All endpoints (except `/health` and `/`) require `Authorization: Bearer <key>`. The chat endpoints (`/ask-jose*`, `/transcribe`, `/ws`) accept `TWIN_PUBLIC_KEY`, the key josepeon.co ships in its browser bundle. The `/agent/*` draft queue accepts only the secret `TWIN_API_KEY`.
 
 ## Deploy to Railway
 
