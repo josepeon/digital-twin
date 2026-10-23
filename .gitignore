@@ -9,10 +9,10 @@ data/personal/voice/en/
 data/personal/voice/es/
 data/personal/voice/pvc_recordings/
 
-# These ARE tracked (needed for Railway deployment):
-#   data/personal/rag_index/       — ChromaDB embeddings (~128MB)
-#   data/personal/voice/voice_id_*.txt — ElevenLabs voice clone IDs
-#   data/personal/identity/        — jose_facts.json
+# Needed at runtime but never committed (this repo is public): deploy.sh
+# stages them into the Railway upload.
+data/personal/identity/
+data/personal/voice/voice_id_*.txt
 
 # ── Build artifacts ───────────────────────────────────────────────────────────
 models/

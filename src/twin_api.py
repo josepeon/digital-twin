@@ -646,6 +646,21 @@ async def oh_agent_endpoint(ws: WebSocket):
     from src import oh_agent
 
     await ws.accept()
+    if TWIN_API_KEY:
+        token = ws.headers.get("authorization", "")
+        token = token[7:] if token.startswith("Bearer ") else ws.headers.get("x-api-key", "")
+        if not token:
+            try:
+                first = json.loads(await asyncio.wait_for(ws.receive_text(), timeout=10))
+            except Exception:  # noqa: BLE001 — timeout, bad JSON, disconnect
+                first = {}
+            if isinstance(first, dict) and first.get("type") == "auth":
+                token = str(first.get("key", ""))
+        if not _key_matches(token, allow_public=False):
+            await ws.send_text(oh_agent.encode_error("Invalid API key"))
+            await ws.close(code=4001)
+            return
+
     if _engine is None:
         await ws.send_text(oh_agent.encode_error("Engine not initialized"))
         await ws.close()

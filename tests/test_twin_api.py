@@ -158,6 +158,45 @@ class TestAuth:
         assert response.status_code == 401
 
 
+class TestOhAgentAuth:
+    def test_rejects_connection_without_key(self, client, monkeypatch):
+        from src import twin_api as api_module
+
+        monkeypatch.setattr(api_module, "TWIN_API_KEY", "admin-key")
+        with client.websocket_connect("/oh/agent") as ws:
+            ws.send_json({"type": "query", "content": "hi"})
+            assert ws.receive_json()["content"] == "Invalid API key"
+
+    def test_rejects_public_site_key(self, client, monkeypatch):
+        from src import twin_api as api_module
+
+        monkeypatch.setattr(api_module, "TWIN_API_KEY", "admin-key")
+        monkeypatch.setattr(api_module, "TWIN_PUBLIC_KEY", "site-key")
+        with client.websocket_connect(
+            "/oh/agent", headers={"Authorization": "Bearer site-key"}
+        ) as ws:
+            assert ws.receive_json()["content"] == "Invalid API key"
+
+    def test_admin_key_in_handshake_gets_presence_ack(self, client, monkeypatch):
+        from src import twin_api as api_module
+
+        monkeypatch.setattr(api_module, "TWIN_API_KEY", "admin-key")
+        with client.websocket_connect(
+            "/oh/agent", headers={"Authorization": "Bearer admin-key"}
+        ) as ws:
+            ws.send_json({"type": "presence", "session_id": "s1"})
+            assert ws.receive_json()["type"] != "error"
+
+    def test_admin_key_as_first_frame(self, client, monkeypatch):
+        from src import twin_api as api_module
+
+        monkeypatch.setattr(api_module, "TWIN_API_KEY", "admin-key")
+        with client.websocket_connect("/oh/agent") as ws:
+            ws.send_json({"type": "auth", "key": "admin-key"})
+            ws.send_json({"type": "presence", "session_id": "s1"})
+            assert ws.receive_json()["type"] != "error"
+
+
 class TestErrorDetails:
     def test_tts_failure_does_not_leak_upstream_detail(self, client):
         client._fake_voice.speak.side_effect = RuntimeError(

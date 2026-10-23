@@ -16,6 +16,10 @@ Design:
 - Streaming uses the existing PersonalityEngine.ask_stream() generator
   so latency is identical to the WS chat path.
 
+Auth: admin key only (TWIN_API_KEY), never the public site key. Send it
+in the handshake (``Authorization: Bearer <key>`` or ``X-API-Key``) or as
+the first frame ``{"type": "auth", "key": "..."}``.
+
 Protocol:
 
     Client → Server:
@@ -157,6 +161,6 @@ async def stream_response(engine, parsed: dict[str, Any]):
                 yield encode_delta(delta, session_id)
     except Exception as exc:  # noqa: BLE001 — never close the stream silently
         logger.exception("OH agent stream failed")
-        yield encode_error(str(exc), session_id)
+        yield encode_error("Something went wrong, please try again", session_id)
 
     yield encode_done(session_id)
