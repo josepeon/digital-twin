@@ -24,6 +24,17 @@ class TestDetectLanguage:
     def test_cuban_spanish(self):
         assert detect_language("Asere qué bolá? Dale vamos para la casa") == "es"
 
+    def test_short_spanish_questions(self):
+        for q in ("En qué trabajas?", "¿Qué haces?", "Hola", "¿De dónde eres?"):
+            assert detect_language(q) == "es", q
+
+    def test_english_question_mentioning_cuba_stays_english(self):
+        assert detect_context("How old were you when you left Cuba?")["language"] == "en"
+
+    def test_signals_match_whole_words_only(self):
+        assert detect_register("Tell me about your work") != "casual"
+        assert detect_register("I love Casanova movies") != "family"
+
 
 class TestDetectRegister:
     def test_casual(self):

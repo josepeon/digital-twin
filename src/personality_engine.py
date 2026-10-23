@@ -235,29 +235,49 @@ PROFESSIONAL_SIGNALS = {
     "as discussed", "per our", "action item",
 }
 
+# "cuba" is not here on purpose: an English question about Cuba is not a
+# family conversation, and family forces a Spanish reply.
 FAMILY_SIGNALS = {
-    "mamá", "papá", "familia", "hermano", "hermana", "cuba",
+    "mamá", "papá", "familia", "hermano", "hermana",
     "casa", "mami", "papi", "abuela", "abuelo", "primo",
     "tío", "tía", "mi amor", "mi vida",
+}
+
+# Common English function words, weighed against SPANISH_SIGNALS so a short
+# Spanish question ("¿Qué haces?", "Hola") isn't read as English.
+ENGLISH_SIGNALS = {
+    "the", "you", "your", "what", "how", "do", "does", "did", "are", "is",
+    "was", "were", "where", "when", "who", "why", "my", "me", "can", "about",
+    "tell", "and", "of", "to", "with", "have", "hey", "hello",
 }
 
 
 def detect_language(text: str) -> str:
     """Detect whether text is English or Spanish."""
-    words = set(re.findall(r"\w+", text.lower()))
-    spanish_count = len(words & SPANISH_SIGNALS)
-    return "es" if spanish_count >= 2 else "en"
+    lower = text.lower()
+    words = set(re.findall(r"\w+", lower))
+    spanish = len(words & SPANISH_SIGNALS)
+    if any(c in lower for c in "¿¡ñ"):
+        spanish += 2
+    english = len(words & ENGLISH_SIGNALS)
+    return "es" if spanish > english else "en"
+
+
+def _has_signal(text: str, signals: set[str]) -> bool:
+    # Whole words or phrases only: a bare substring check fires "casa" inside
+    # "casanova" and "yo" inside "your".
+    return any(re.search(rf"\b{re.escape(s)}\b", text) for s in signals)
 
 
 def detect_register(query: str) -> str:
     """Detect conversational register from query."""
     query_lower = query.lower()
 
-    if any(s in query_lower for s in FAMILY_SIGNALS):
+    if _has_signal(query_lower, FAMILY_SIGNALS):
         return "family"
-    if any(s in query_lower for s in PROFESSIONAL_SIGNALS):
+    if _has_signal(query_lower, PROFESSIONAL_SIGNALS):
         return "professional"
-    if any(s in query_lower for s in CASUAL_SIGNALS):
+    if _has_signal(query_lower, CASUAL_SIGNALS):
         return "casual"
     return "neutral"
 
